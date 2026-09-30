@@ -5,14 +5,37 @@ import ParrotCore
 // Developer benchmarks for Parrot. Not part of Parrot.app.
 
 /// `parrot-bench transcription <folder>` times the model;
-/// `parrot-bench capture` times the microphone.
+/// `parrot-bench capture` times the microphone;
+/// `parrot-bench ax-probe` checks what your apps' text fields offer.
 struct Bench: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "parrot-bench",
         abstract: "Measure latency: the model over recordings, or microphone capture.",
-        subcommands: [BenchTranscription.self, BenchCapture.self],
+        subcommands: [BenchTranscription.self, BenchCapture.self, BenchAXProbe.self],
         defaultSubcommand: BenchTranscription.self
     )
+}
+
+/// What each app's focused text field offers over Accessibility (ADR-006).
+struct BenchAXProbe: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "ax-probe",
+        abstract: "Check which Accessibility reads and notifications your apps' text fields support.",
+        discussion: """
+            Watches the focused element for --seconds while you click into a \
+            text field in each app and type a few characters. Prints one row \
+            per app and role with flags and counts. Never prints text. The \
+            terminal needs the Accessibility permission.
+            """
+    )
+
+    @Option(name: .long, help: "Seconds to watch.") var seconds: Double = 45
+
+    @Option(name: .long, help: "Seconds between two looks at the focused element.") var interval: Double = 0.5
+
+    func run() throws {
+        try exiting { try AXProbe.run(AXProbeOptions(seconds: seconds, interval: interval)) }
+    }
 }
 
 /// Press-to-first-sample of the default input (#52).

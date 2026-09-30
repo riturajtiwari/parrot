@@ -12,13 +12,15 @@
 # hardened runtime, as notarization requires.
 #
 # Signs with the first "Developer ID Application" identity in the keychain,
+# else the first "Apple Development" one (free with an Apple ID in Xcode),
 # with the hardened runtime and packaging/Parrot.entitlements. The
 # designated requirement then names the bundle ID and the team, not a
 # cdhash, so macOS keeps the Microphone and Accessibility grants across
 # builds. Without an identity the app is ad-hoc signed and every build is a
 # new identity; the script says so.
 #
-#   PARROT_SIGN_IDENTITY   signing identity (default: the keychain's Developer ID)
+#   PARROT_SIGN_IDENTITY   signing identity (default: the keychain's Developer
+#                          ID, else its Apple Development identity)
 #   PARROT_TIMESTAMP=none  skip the secure timestamp (local builds, offline);
 #                          notarization needs it, so releases leave this unset
 #   PARROT_BUILD_DIR       output directory (default: build)
@@ -33,6 +35,10 @@ APP="$OUT/Parrot.app"
 
 IDENTITY="${PARROT_SIGN_IDENTITY:-$(security find-identity -v -p codesigning \
     | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}"
+if [ -z "$IDENTITY" ]; then
+    IDENTITY="$(security find-identity -v -p codesigning \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
+fi
 
 echo "→ building parrot $VERSION (release, arm64)"
 swift build -c release --arch arm64 --product parrot
@@ -77,7 +83,7 @@ if [ -n "$IDENTITY" ]; then
     echo "→ signing as $IDENTITY"
     SIGN_AS="$IDENTITY"
 else
-    echo "! no Developer ID Application identity; ad-hoc signing."
+    echo "! no Developer ID Application or Apple Development identity; ad-hoc signing."
     echo "  Permissions will not survive the next build, and the app can't be notarized."
     SIGN_AS="-"
     TIMESTAMP="--timestamp=none"

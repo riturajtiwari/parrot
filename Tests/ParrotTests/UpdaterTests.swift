@@ -35,16 +35,27 @@ final class UpdaterTests: XCTestCase {
         XCTAssertNotNil(Updater.configurationProblem(info: info(version: "0.1.0", feed: "not a url")))
     }
 
-    func testThePackagedInfoPlistPointsAtTheReleaseFeed() throws {
-        // packaging/Info.plist, found from this file: Tests/ParrotTests/ → repo root.
+    /// packaging/Info.plist, found from this file: Tests/ParrotTests/ → repo root.
+    private func packagedInfoPlist() throws -> [String: Any] {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("packaging/Info.plist"))
-        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
-        XCTAssertEqual(plist["SUFeedURL"] as? String, feed)
-        XCTAssertEqual(plist["SUEnableAutomaticChecks"] as? Bool, true)
-        XCTAssertEqual(plist["SUScheduledCheckInterval"] as? Int, 86400)
-        XCTAssertEqual(plist["SURequireSignedFeed"] as? Bool, true)
-        XCTAssertEqual(plist["SUVerifyUpdateBeforeExtraction"] as? Bool, true)
-        XCTAssertNotNil(plist["SUPublicEDKey"] as? String)
+        return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    }
+
+    /// The fork never updates itself: an upstream release has another bundle
+    /// identifier and signing team, and would replace the fork's features.
+    func testTheForkNeverUpdatesItself() throws {
+        var plist = try packagedInfoPlist()
+        XCTAssertNil(plist["SUFeedURL"])
+        XCTAssertNil(plist["SUPublicEDKey"])
+        XCTAssertEqual(plist["SUEnableAutomaticChecks"] as? Bool, false)
+        plist["CFBundleVersion"] = "0.2.1"
+        XCTAssertNotNil(Updater.configurationProblem(info: plist))
+    }
+
+    /// `AppBundle.current` compares the running bundle with this identifier,
+    /// so a mismatch would stop the app role from ever being detected.
+    func testTheBundleIdentifierMatchesTheCode() throws {
+        XCTAssertEqual(try packagedInfoPlist()["CFBundleIdentifier"] as? String, AppBundle.identifier)
     }
 }

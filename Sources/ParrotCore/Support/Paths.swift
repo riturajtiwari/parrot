@@ -36,6 +36,22 @@ package enum Paths {
     /// startup by `DictionaryMigration`.
     static var legacyDictionaryFile: URL { config.appendingPathComponent("dictionary.json") }
 
+    /// `learned-dictionary` in `appSupport`: rows Parrot added on its own, in
+    /// the dictionary's format. Loaded after `dictionaryFile`, whose rows win.
+    /// Parrot owns it, so it never writes into a dotfiles repository (ADR-006).
+    package static var learnedDictionaryFile: URL { appSupport.appendingPathComponent("learned-dictionary") }
+
+    /// `corrections.json` in `appSupport`: learned word pairs, their evidence
+    /// and status, and the user's decisions. Word pairs only (ADR-006).
+    package static var correctionsFile: URL { appSupport.appendingPathComponent("corrections.json") }
+
+    /// Held with `flock` while the app or the CLI writes a dictionary or
+    /// `corrections.json`, so two writers never interleave.
+    package static var dictionaryLock: URL { appSupport.appendingPathComponent("dictionary.lock") }
+
+    /// Wispr Flow's local database, which `parrot import wispr` reads.
+    package static var wisprDatabase: URL { library("Application Support/Wispr Flow").appendingPathComponent("flow.sqlite") }
+
     /// The app's stdout.
     static var daemonOutLog: URL { logs.appendingPathComponent("parrot.out.log") }
 

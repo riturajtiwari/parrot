@@ -11,7 +11,7 @@
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.humanitas.parrot</string>
+	<string>io.github.riturajtiwari.parrot</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -32,19 +32,10 @@
 	<string>Copyright © Humanitas Labs. MIT License.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Parrot records while you hold the dictation key and turns your speech into text on this Mac. Audio never leaves it.</string>
+	<!-- Fork: no SUFeedURL and no SUPublicEDKey, so Updater.start logs "updates off"
+	     and the app never replaces itself with an upstream release, which has another
+	     bundle identifier and another signing team. -->
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>https://github.com/humanitas-labs/parrot/releases/latest/download/appcast.xml</string>
-	<!-- Public half of the Parrot update key (generate_keys --account parrot). The private
-	     half is the SPARKLE_PRIVATE_KEY repository secret; release.yml checks they match. -->
-	<key>SUPublicEDKey</key>
-	<string>sBKarVRumHAb75Avth4zTROhclldBN+nUC3ffkhcoTw=</string>
-	<key>SURequireSignedFeed</key>
-	<true/>
-	<key>SUScheduledCheckInterval</key>
-	<integer>86400</integer>
-	<key>SUVerifyUpdateBeforeExtraction</key>
-	<true/>
+	<false/>
 </dict>
 </plist>

@@ -9,8 +9,10 @@ import Foundation
 /// through the `/usr/local/bin/parrot` symlink, it is the CLI.
 public enum AppBundle {
     /// Parrot's bundle identifier. TCC grants and the login item key to it,
-    /// so it never changes (ADR-005).
-    static let identifier = "com.humanitas.parrot"
+    /// so it never changes (ADR-005). The fork has its own, so it never takes
+    /// the grants, the login item or the updates of upstream's app. It must
+    /// match `CFBundleIdentifier` in packaging/Info.plist (UpdaterTests).
+    static let identifier = "io.github.riturajtiwari.parrot"
 
     /// The bundle's URL when the main bundle is Parrot.app, else nil (a bare
     /// `swift build` binary).

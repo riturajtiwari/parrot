@@ -4,9 +4,12 @@
 #
 # macOS keys the Accessibility and Microphone grants to the app's code
 # identity. An ad-hoc signature changes on every build, so each rebuild
-# silently loses the grants. Signing with the Developer ID certificate and
-# the fixed bundle ID com.humanitas.parrot (packaging/Info.plist) keeps one
+# silently loses the grants. Signing with a Developer ID or Apple Development
+# certificate and the fixed bundle ID in packaging/Info.plist keeps one
 # identity across rebuilds and releases.
+#
+# The fork has its own bundle ID, so it refuses to replace a Parrot.app with
+# another one, such as upstream's release. Remove that app first.
 #
 # Installs to /Applications, or ~/Applications when /Applications is not
 # writable, and links /usr/local/bin/parrot to the app's executable. A plain
@@ -33,6 +36,16 @@ LINK_DIR="${PARROT_LINK_DIR-/usr/local/bin}"
 BUILD="${PARROT_BUILD_DIR:-build}"
 DEST="$PARROT_INSTALL_DIR/Parrot.app"
 EXE="$DEST/Contents/MacOS/parrot"
+
+WANT_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' packaging/Info.plist)"
+if [ -d "$DEST" ]; then
+    HAVE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$DEST/Contents/Info.plist" 2>/dev/null || echo unknown)"
+    if [ "$HAVE_ID" != "$WANT_ID" ]; then
+        echo "! $DEST is $HAVE_ID, not $WANT_ID."
+        echo "  Quit it, turn off its login item, and move it to the Trash first."
+        exit 1
+    fi
+fi
 
 VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)"
 PARROT_TIMESTAMP=none PARROT_BUILD_DIR="$BUILD" scripts/build-app.sh "${VERSION#v}"

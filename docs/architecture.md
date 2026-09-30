@@ -209,7 +209,7 @@ Everything after the checks happens behind the menu-bar icon, so the app is neve
 
 ## 8. Rules
 
-1. Never write transcript text to logs, disk, or stats. The dictionary is the only user-authored text Parrot stores.
+1. Never write transcript text to logs, disk, or stats. The dictionary is the only user-authored text Parrot stores. Fork (ADR-006): learned corrections also store word pairs of at most 3 words a side, in `corrections.json` and the `learned-dictionary` overlay, never sentences.
 2. Every on-disk location comes from `Paths`.
 3. Every persistent preference lives in `Settings` and changes through `SettingsStore`. No `UserDefaults`, no plist flags. The one exception is state Sparkle owns (last check time, the user's auto-install choice), which Sparkle keeps in the `com.humanitas.parrot` defaults domain.
 4. New behaviour after transcription is a `TranscriptProcessor` or a `DictationObserver`, not an edit to `DictationController`.
@@ -236,3 +236,4 @@ Architecture decisions are recorded in [`decisions/`](decisions/). Each says wha
 | [003](decisions/003-push-to-talk-on-a-modifier.md) | Push-to-talk on a single modifier key |
 | [004](decisions/004-local-data-and-privacy.md) | Local data and privacy |
 | [005](decisions/005-signed-app-identity.md) | Signed app identity |
+| [006](decisions/006-learned-corrections.md) | Learned corrections (fork): word pairs only, overlay for automatic adds, optional LLM judge |
