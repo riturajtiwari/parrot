@@ -103,7 +103,8 @@ public enum Daemon {
         menuBar.onOpenSettings = { settingsWindow.show() }
         // Fix Word, Review Corrections and Undo (ADR-006). The service works
         // only when macOS knows the bundle, so only in the app role.
-        let corrections = CorrectionsUI(menuBar: menuBar)
+        let corrections = CorrectionsUI(menuBar: menuBar, settings: settings)
+        settingsWindow.onOpenReview = { corrections.showReview() }
         if AppLaunch.isApp {
             NSApp.servicesProvider = corrections.service
             NSUpdateDynamicServices()

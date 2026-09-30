@@ -8,6 +8,8 @@ import SwiftUI
 final class SettingsWindow {
     private let store: SettingsStore
     private var window: NSWindow?
+    /// Opens Review Corrections, from the Corrections section (fork).
+    var onOpenReview: () -> Void = {}
 
     init(store: SettingsStore) {
         self.store = store
@@ -33,7 +35,7 @@ final class SettingsWindow {
         // The header inside says it; the title still names the window in
         // Mission Control and the window switcher.
         window.titleVisibility = .hidden
-        window.contentView = NSHostingView(rootView: SettingsView(store: store))
+        window.contentView = NSHostingView(rootView: SettingsView(store: store, openReview: { [weak self] in self?.onOpenReview() }))
         window.isReleasedWhenClosed = false
         window.center()
         return window
@@ -51,6 +53,7 @@ final class SettingsWindow {
 /// carry the style, as in the onboarding window.
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
+    var openReview: () -> Void = {}
 
     var body: some View {
         ScrollView {
@@ -76,7 +79,7 @@ struct SettingsView: View {
                 Divider()
                 TranscriptionSection(store: store)
                 Divider()
-                CorrectionsSection(store: store)
+                CorrectionsSection(store: store, openReview: openReview)
             }
             .padding(.horizontal, 32)
             .padding(.top, 36)

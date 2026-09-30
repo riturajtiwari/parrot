@@ -63,6 +63,11 @@ struct CorrectionActions {
 
     /// The pending pairs, most seen first, each judged again, and the added
     /// pairs the user reverted since (suspect), first.
+    ///
+    /// A pending pair shows the rules recorded with it, when it has any:
+    /// they came from evidence that is not all stored, such as context, and
+    /// from the LLM judge. The local rules still apply, so a rule that they
+    /// block now drops out; only `prompt` may come from the judge alone.
     func pending(judge: LocalJudge = LocalJudge()) throws -> [Review] {
         let known = Set(Self.words(in: dictionary).map { $0.lowercased() })
         return try store.load().pairs
@@ -71,10 +76,12 @@ struct CorrectionActions {
             .map { pair in
                 let change = WordChange(heard: pair.heard.map { WordDiff.words($0).map(\.text) } ?? [],
                                         corrected: WordDiff.words(pair.word).map(\.text))
-                var verdict = judge.judge(change, evidence: CorrectionEvidence(seen: pair.seen), known: known)
+                var verdict = judge.judge(change, evidence: pair.evidence, known: known)
                 if pair.status == .suspect {
                     verdict.rules = Set(pair.rules)
                     verdict.reasons.insert("you reverted what this rule wrote; Reject removes it", at: 0)
+                } else if !pair.rules.isEmpty {
+                    verdict.rules = Set(pair.rules).intersection(LLMJudge.allowed(verdict))
                 }
                 return Review(pair: pair, change: change, verdict: verdict)
             }

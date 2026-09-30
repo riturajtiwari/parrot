@@ -9,41 +9,23 @@ public enum CorrectionCommands {
     /// `apply`, asks about each proposal and writes the accepted rows. With
     /// `llm`, the LLM judge set in Settings reviews the proposals first.
     public static func importWispr(database: String?, apply: Bool, all: Bool, llm: Bool = false) throws {
-        let file = database.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? Paths.wisprDatabase
-        let actions = CorrectionActions()
-        let known = Set(LayeredDictionary().current().dictionary.terms.map { $0.lowercased() })
+        var run = WisprImportRun()
+        if let database { run.database = URL(fileURLWithPath: (database as NSString).expandingTildeInPath) }
+        let known = WisprImportRun.knownWords()
         var result: WisprImport
         do {
-            let learned = try actions.store.load()
-            // What Parrot's own model wrote for the user's terms, saved by
-            // `parrot-bench wispr-replay --save`.
-            let whisper = learned.pairs
-                .filter { $0.status == .pending && $0.sources.contains(.whisper) }
-                .compactMap { pair -> (change: WordChange, seen: Int)? in
-                    guard let heard = pair.heard else { return nil }
-                    return (WordChange(heard: WordDiff.words(heard).map(\.text), corrected: WordDiff.words(pair.word).map(\.text)), pair.seen)
-                }
-            let db = try WisprDatabase(file: file)
-            result = WisprImport(
-                dictionary: try db.dictionary(),
-                dictations: try db.dictations(),
-                whisper: whisper,
-                judge: LocalJudge(),
-                known: known,
-                decided: learned
-            )
+            result = try run.analyze(known: known)
         } catch let error as WisprError {
             print(error)
             throw SilentExit(1)
         }
-        if llm { try judgeWithLLM(&result, known: known) }
+        if llm { try judgeWithLLM(&result, run: run, known: known) }
 
         let s = result.summary
         print("Wispr Flow: \(s.dictionaryRows) dictionary rows (\(s.snippets) snippets skipped), \(s.dictations) dictations, \(s.edited) edited, \(s.rewrites) rewrites.")
-        let open = result.candidates.filter { $0.decided == nil }
-        let proposed = open.filter(\.verdict.learns)
-        let declined = open.filter { !$0.verdict.learns }
-        let decided = result.candidates.count - open.count
+        let proposed = result.proposed
+        let declined = result.declined
+        let decided = result.candidates.count - result.open.count
         print("\nProposed (\(proposed.count))\(decided > 0 ? ", \(decided) already decided" : ""):")
         printTable(proposed)
         var kinds: [String: Int] = [:]
@@ -60,14 +42,12 @@ public enum CorrectionCommands {
             print("--apply asks about each proposal, so it needs a terminal.")
             throw SilentExit(1)
         }
-        try actions.store.update { pairs in
-            for candidate in proposed { pairs.record(pending(candidate)) }
-        }
-        try review(proposed, actions: actions)
+        try run.record(result)
+        try review(proposed, actions: run.actions)
     }
 
     /// Lets the LLM judge in Settings review the open candidates, in batches.
-    private static func judgeWithLLM(_ result: inout WisprImport, known: Set<String>) throws {
+    private static func judgeWithLLM(_ result: inout WisprImport, run: WisprImportRun, known: Set<String>) throws {
         let settings = CorrectionSettings.saved()
         let client: LLMClient
         do {
@@ -76,17 +56,17 @@ public enum CorrectionCommands {
             print("LLM judge: \(error). Set a provider in Settings → Corrections, or `parrot llm set-key`.")
             throw SilentExit(1)
         }
-        let open = result.candidates.indices.filter { result.candidates[$0].decided == nil }
-        let items = open.map { LLMJudge.Item(change: result.candidates[$0].change, evidence: result.candidates[$0].evidence) }
-        print("LLM judge: \(settings.provider.displayName), \(settings.resolvedModel ?? "?"), \(items.count) pairs…")
-        let judge = LLMJudge(client: client, local: LocalJudge())
+        print("LLM judge: \(settings.provider.displayName), \(settings.resolvedModel ?? "?"), \(result.open.count) pairs…")
         let started = Date()
-        let outcome = blocking { await judge.judge(items, known: known) }
-        for (index, verdict) in zip(open, outcome.verdicts) {
-            result.candidates[index].verdict = verdict
+        let snapshot = result
+        let (judged, failures) = blocking { () async -> (WisprImport, [LLMError]) in
+            var copy = snapshot
+            let failures = await run.review(&copy, client: client, known: known)
+            return (copy, failures)
         }
+        result = judged
         print(String(format: "LLM judge: done in %.0f s%@", Date().timeIntervalSince(started),
-                     outcome.failures.isEmpty ? "" : ", \(outcome.failures.count) failed request(s) kept the local verdict: \(outcome.failures.map(\.description).joined(separator: "; "))"))
+                     failures.isEmpty ? "" : ", \(failures.count) failed request(s) kept the local verdict: \(failures.map(\.description).joined(separator: "; "))"))
     }
 
     /// Lists every learned pair with its status.
@@ -187,11 +167,11 @@ public enum CorrectionCommands {
             """)
         print("> ", terminator: "")
         guard let sentence = readLine()?.trimmingCharacters(in: .whitespaces), !sentence.isEmpty else { return }
-        let count = sentence.split(whereSeparator: \.isWhitespace).count
-        if count > 12 { print("  That has \(count) words. Each word adds about 4 ms to every dictation on whisper-base.en.") }
+        let count = ExampleSentence.wordCount(sentence)
+        if count > ExampleSentence.suggestedMaxWords { print("  That has \(count) words. Each word adds about 4 ms to every dictation on whisper-base.en.") }
         MainActor.assumeIsolated {
             let settings = SettingsStore()
-            settings.update { $0.dictionary.examples["en"] = sentence }
+            settings.update { $0.dictionary.examples[ExampleSentence.language] = sentence }
         }
         print("  saved as the English example sentence in settings.json")
     }
@@ -216,20 +196,6 @@ public enum CorrectionCommands {
             print("  not written: \(error)")
             throw SilentExit(1)
         }
-    }
-
-    private static func pending(_ candidate: WisprImport.Candidate) -> LearnedPair {
-        let now = Date()
-        return LearnedPair(
-            word: candidate.change.correctedText,
-            heard: candidate.change.heard.isEmpty ? nil : candidate.change.heardText,
-            rules: candidate.verdict.rules.sorted(),
-            status: .pending,
-            sources: candidate.sources.sorted(),
-            seen: candidate.evidence.seen,
-            firstSeen: now,
-            lastSeen: now
-        )
     }
 
     // MARK: - Printing

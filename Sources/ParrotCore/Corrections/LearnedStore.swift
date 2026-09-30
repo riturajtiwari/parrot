@@ -49,9 +49,19 @@ struct LearnedPair: Codable, Equatable, Sendable {
     /// The rules first proposed, kept after the user decides, so the hybrid
     /// gate can measure how often the proposals were right.
     var proposed: [CorrectionRule]?
+    /// Times the heard form occurs in text the user kept, when an import
+    /// counted it. A count, never the text.
+    var keptHeard: Int?
+    /// The user added the word by hand, for example in Wispr Flow.
+    var manual: Bool?
 
     /// The identity of a pair: the word and the heard form, in any case.
     var key: String { Self.key(word: word, heard: heard) }
+
+    /// What the local rules judge the pair with.
+    var evidence: CorrectionEvidence {
+        CorrectionEvidence(seen: seen, keptHeard: keptHeard ?? 0, manual: manual ?? false)
+    }
 
     static func key(word: String, heard: String?) -> String {
         word.lowercased() + "\u{1F}" + (heard?.lowercased() ?? "")
@@ -81,6 +91,8 @@ struct LearnedPairs: Codable, Equatable, Sendable {
             pairs[index].seen = max(pairs[index].seen, pair.seen)
             pairs[index].sources = Array(Set(pairs[index].sources + pair.sources)).sorted()
             pairs[index].lastSeen = max(pairs[index].lastSeen, pair.lastSeen)
+            if let kept = pair.keptHeard { pairs[index].keptHeard = max(pairs[index].keptHeard ?? 0, kept) }
+            if pair.manual == true { pairs[index].manual = true }
             if pairs[index].status == .pending {
                 pairs[index].rules = pair.rules
                 pairs[index].proposed = pair.proposed ?? pair.rules

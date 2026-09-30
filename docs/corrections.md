@@ -1,6 +1,6 @@
 # Learned corrections (fork)
 
-Last updated: `2026.09.29`
+Last updated: `2026.09.30`
 
 > This fork of Parrot learns the spellings that you correct: names, brands, acronyms, technical terms, and joins or casing of such words. It can also import what Wispr Flow learned. Every learned pair is a few words, never a sentence. See [ADR-006](decisions/006-learned-corrections.md) for the decisions.
 
@@ -19,6 +19,10 @@ Each dictionary row changes every dictation, so local checks block the unsafe ca
 ## 2. Import from Wispr Flow
 
 Parrot reads Wispr Flow's database read-only. It never writes to Wispr's files.
+
+In **Settings → Corrections**, click **Import** next to Wispr Flow. Parrot applies the rules to each pair. When you connected a judge, the judge checks the pairs too. Then **Review Corrections** opens with the proposals. Accept or reject each one there. A second import adds only new pairs, and a pair you decided keeps your decision.
+
+The same import from a terminal:
 
 ```sh
 parrot import wispr            # print what Parrot would learn
@@ -46,7 +50,11 @@ To set a shortcut, open **System Settings → Keyboard → Keyboard Shortcuts �
 
 ## 4. Review and Undo
 
-**Review Corrections…** in the menu lists the pairs that wait for you, with the proposed rules, and the pairs added so far, with Undo. **Undo** in the menu removes the word Parrot added last. From a terminal:
+**Review Corrections…** in the menu lists the pairs that wait for you, with the proposed rules and where each pair came from, and the pairs added so far, with Undo. **Undo** in the menu removes the word Parrot added last.
+
+Under the lists is the **Example sentence**. Whisper reads it before each dictation, so it writes the words in it your way. The window names the accepted words that the sentence does not hold yet. Keep it to 12 words or fewer: each word adds about 4 ms to every dictation.
+
+From a terminal:
 
 ```sh
 parrot corrections list
@@ -69,8 +77,19 @@ If you change a word that a learned rule wrote back to what you said, Parrot mar
 
 ## 6. The LLM judge
 
-The local rules work without a network. An LLM judge can check their proposals. **Settings → Corrections → Judge** offers Claude, OpenAI, Gemini, OpenRouter, Ollama, LM Studio, and any other OpenAI-compatible server.
+The local rules work without a network. An LLM judge can check their proposals. **Settings → Corrections → Judge** shows a tile for each provider. Click a tile to connect it:
 
+| Provider | How it connects |
+|---|---|
+| Claude, OpenAI, Gemini | Parrot opens the page where you make a key: the Claude Console, the OpenAI Platform, or Google AI Studio. Copy the new key. Parrot takes it from the clipboard, checks it, saves it in the Keychain, and removes it from the clipboard. These providers let no other app sign in for you. |
+| OpenRouter | Sign in to OpenRouter in your browser. OpenRouter gives Parrot a key of its own, which you can delete on openrouter.ai. |
+| Ollama, LM Studio | Parrot finds the server on this Mac and picks one of its models. Nothing leaves the Mac. |
+| Other | Type the base URL of any OpenAI-compatible server, and a key if it needs one. |
+
+Parrot picks a model for you. To change it, use **Model**. **Test Connection** sends two made-up pairs. **Disconnect** removes the key from the Keychain. The key still works at the provider until you delete it there.
+
+- Parrot reads the clipboard only while the Connect window is open. It takes only text in the shape of that provider's key.
+- The OpenRouter sign-in listens on this Mac's loopback address for one request, for at most 5 minutes.
 - The key goes into the Keychain, never into `settings.json`.
 - The judge gets each pair, such as "Kwilbo → Qwilbo", and a few local features. It never gets a sentence or audio.
 - The judge can drop or narrow a proposal. It can never add a rule that a local check blocks.

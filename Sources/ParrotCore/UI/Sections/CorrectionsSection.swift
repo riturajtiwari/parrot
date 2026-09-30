@@ -1,20 +1,35 @@
 import SwiftUI
 
 /// Learned corrections and the LLM judge (fork, ADR-006): how Parrot learns,
-/// which provider judges the pairs, and its key. The key goes to the
-/// Keychain, never to `settings.json`.
+/// which provider judges the pairs, the Wispr Flow import, and the way to
+/// Review Corrections. Keys go to the Keychain, never to `settings.json`.
 struct CorrectionsSection: View {
     @ObservedObject var store: SettingsStore
-    @State private var keyDraft = ""
+    /// Opens Review Corrections.
+    var openReview: () -> Void = {}
+
+    @State private var connecting: LLMProvider?
     @State private var hasKey = false
     @State private var models: [String] = []
     @State private var status: String?
     @State private var busy = false
+    @State private var importing = false
+    @State private var importStatus: String?
+    @State private var pendingCount = 0
 
     private let credentials = CredentialStore()
 
     private var settings: CorrectionSettings { store.current.corrections }
     private var provider: LLMProvider { settings.provider }
+
+    /// A provider is set and has what it needs to answer.
+    private var isConnected: Bool {
+        switch provider {
+        case .none: return false
+        case .custom: return settings.resolvedBaseURL != nil
+        default: return !provider.needsKey || hasKey
+        }
+    }
 
     var body: some View {
         SettingsGroup("Corrections") {
@@ -30,88 +45,77 @@ struct CorrectionsSection: View {
                 caption(HybridGate.status((try? LearnedStore().load().pairs) ?? []).summary)
             }
 
-            PillRow("Judge") {
-                PillMenu(title: provider.displayName) {
-                    ForEach(LLMProvider.allCases, id: \.self) { choice in
-                        Button(choice.displayName) {
-                            store.update {
-                                $0.corrections.provider = choice
-                                $0.corrections.model = nil
-                                $0.corrections.baseURL = nil
-                            }
-                            models = []
-                            status = nil
-                            refreshKey()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Judge")
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                    ForEach(LLMProvider.connectable) { choice in
+                        ProviderTile(provider: choice, selected: isConnected && choice == provider) {
+                            connecting = choice
                         }
                     }
                 }
             }
+            judge
 
-            if provider != .none {
-                if provider == .custom {
-                    field("Base URL", text: Binding(
-                        get: { settings.baseURL ?? "" },
-                        set: { value in store.update { $0.corrections.baseURL = value.isEmpty ? nil : value } }
-                    ), placeholder: "https://…/v1")
+            if WisprImportRun.isAvailable() {
+                PillRow("Wispr Flow") {
+                    Button(importing ? "Importing…" : "Import", action: importWispr)
+                        .buttonStyle(.pill)
+                        .disabled(importing)
                 }
-
-                HStack {
-                    Text("Model")
-                    Spacer()
-                    if models.isEmpty {
-                        TextField(provider.defaultModel ?? "model id", text: Binding(
-                            get: { settings.model ?? "" },
-                            set: { value in store.update { $0.corrections.model = value.isEmpty ? nil : value } }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 220)
-                    } else {
-                        PillMenu(title: settings.resolvedModel ?? "Choose a model") {
-                            ForEach(models, id: \.self) { id in
-                                Button(id) { store.update { $0.corrections.model = id } }
-                            }
-                        }
-                    }
-                    Button("Load Models", action: loadModels).buttonStyle(.pill).disabled(busy)
-                }
-
-                if provider.needsKey || provider == .custom {
-                    HStack {
-                        Text("API key")
-                        Spacer()
-                        if hasKey {
-                            Text("Saved in the Keychain").foregroundStyle(.secondary)
-                            Button("Remove", action: removeKey).buttonStyle(.pill)
-                        } else {
-                            SecureField("paste the key", text: $keyDraft)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 220)
-                                .onSubmit(saveKey)
-                            Button("Save", action: saveKey).buttonStyle(.pill).disabled(keyDraft.isEmpty)
-                        }
-                    }
-                }
-
-                PillRow("Check") {
-                    Button("Test Connection", action: test).buttonStyle(.pill).disabled(busy)
-                }
-                if let status { caption(status) }
-
-                caption(provider.isRemote
-                    ? "Sends each learned pair, such as “Kwilbo → Qwilbo”, to \(provider.displayName). Never a sentence, never audio."
-                    : "The judge runs on this Mac. Nothing leaves it.")
-            } else {
-                caption("Only the local rules judge learned pairs. Nothing leaves this Mac.")
+                caption(importStatus ?? (isConnected
+                    ? "Reads the words Wispr Flow learned and the edits you made there. Wispr's files stay as they are. \(provider.shortName) checks each pair, and the proposals go to Review Corrections."
+                    : "Reads the words Wispr Flow learned and the edits you made there. Wispr's files stay as they are. The proposals go to Review Corrections."))
+            }
+            PillRow("Review") {
+                Button(pendingCount > 0 ? "Review \(pendingCount) Corrections…" : "Review Corrections…", action: openReview)
+                    .buttonStyle(.pill)
             }
         }
-        .onAppear(perform: refreshKey)
+        .onAppear(perform: refresh)
+        .onChange(of: provider) { refresh() }
+        .sheet(item: $connecting, onDismiss: refresh) { choice in
+            ConnectSheet(provider: choice, store: store) { connecting = nil }
+        }
     }
 
-    private func field(_ label: String, text: Binding<String>, placeholder: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField(placeholder, text: text).textFieldStyle(.roundedBorder).frame(width: 260)
+    // MARK: - Judge
+
+    @ViewBuilder private var judge: some View {
+        if provider == .none {
+            caption("Only the local rules judge learned pairs, and nothing leaves this Mac. Click a provider to connect it.")
+        } else if !isConnected {
+            caption("\(provider.shortName) has no key. Click its tile to connect it.")
+        } else {
+            HStack {
+                Text("Model")
+                Spacer()
+                if models.isEmpty {
+                    TextField(provider.defaultModel ?? "model id", text: Binding(
+                        get: { settings.model ?? "" },
+                        set: { value in store.update { $0.corrections.model = value.isEmpty ? nil : value } }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                } else {
+                    PillMenu(title: settings.resolvedModel ?? "Choose a model") {
+                        ForEach(models, id: \.self) { id in
+                            Button(id) { store.update { $0.corrections.model = id } }
+                        }
+                    }
+                }
+                Button("Load Models", action: loadModels).buttonStyle(.pill).disabled(busy)
+            }
+            PillRow("Check") {
+                HStack {
+                    Button("Test Connection", action: test).buttonStyle(.pill).disabled(busy)
+                    Button("Disconnect", action: disconnect).buttonStyle(.pill).disabled(busy)
+                }
+            }
+            if let status { caption(status) }
+            caption(provider.isRemote
+                ? "Sends each learned pair, such as “Kwilbo → Qwilbo”, to \(provider.displayName). Never a sentence, never audio."
+                : "The judge runs on this Mac. Nothing leaves it.")
         }
     }
 
@@ -119,29 +123,26 @@ struct CorrectionsSection: View {
         Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 
-    private func refreshKey() {
-        hasKey = credentials.hasKey(for: provider)
-        keyDraft = ""
+    private func refresh() {
+        hasKey = provider == .none ? false : credentials.hasKey(for: provider)
+        pendingCount = (try? CorrectionActions().pendingCount()) ?? 0
     }
 
-    private func saveKey() {
-        do {
-            try credentials.save(keyDraft, for: provider)
-            status = "Key saved."
-        } catch {
-            status = "\(error)"
+    private func disconnect() {
+        let old = provider
+        if old != .ollama, old != .lmstudio { try? credentials.remove(for: old) }
+        store.update {
+            $0.corrections.provider = .none
+            $0.corrections.model = nil
+            $0.corrections.baseURL = nil
         }
-        refreshKey()
-    }
-
-    private func removeKey() {
-        do {
-            try credentials.remove(for: provider)
-            status = "Key removed."
-        } catch {
-            status = "\(error)"
+        models = []
+        if let page = old.keysPage {
+            status = "Disconnected, and the key is out of the Keychain. It still works at \(old.shortName) until you delete it at \(page.host ?? page.absoluteString)."
+        } else {
+            status = "Disconnected."
         }
-        refreshKey()
+        refresh()
     }
 
     private func loadModels() {
@@ -165,7 +166,7 @@ struct CorrectionsSection: View {
         }
     }
 
-    /// Three made-up pairs, the same as `parrot llm test`.
+    /// Two made-up pairs, the same as `parrot llm test`.
     private func test() {
         let settings = self.settings
         busy = true
@@ -194,6 +195,45 @@ struct CorrectionsSection: View {
             }
         }
     }
+
+    // MARK: - Wispr Flow
+
+    private func importWispr() {
+        var settings = self.settings
+        // A provider without its key can't judge; the local rules still do.
+        if !isConnected { settings.provider = .none }
+        importing = true
+        importStatus = "Reading Wispr Flow…"
+        Task {
+            do {
+                let report = try await WisprImportRun().run(settings: settings, progress: { text in
+                    Task { @MainActor in importStatus = text }
+                })
+                importStatus = Self.summary(report)
+                importing = false
+                refresh()
+                if report.proposed > 0 { openReview() }
+            } catch {
+                importStatus = "Couldn't import: \(error)"
+                importing = false
+            }
+        }
+    }
+
+    static func summary(_ report: WisprImportRun.Report) -> String {
+        var parts = [report.proposed == 1
+            ? "Added 1 proposal to Review Corrections."
+            : "Added \(report.proposed) proposals to Review Corrections."]
+        if let judge = report.judge { parts.append("\(judge.shortName) checked them.") }
+        if report.declined > 0 { parts.append("\(report.declined) pairs teach nothing, such as rewording or common words.") }
+        if report.decided > 0 { parts.append("\(report.decided) you decided before.") }
+        if !report.failures.isEmpty {
+            parts.append("\(report.failures.count) judge request(s) failed, so those pairs kept the local rules: \(report.failures[0]).")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    // MARK: - Text
 
     private static func title(_ mode: CorrectionSettings.Learning) -> String {
         switch mode {

@@ -7,13 +7,15 @@ final class CorrectionsUI {
     private let menuBar: MenuBarController
     private let actions = CorrectionActions()
     private let fixWord = FixWordPanel()
-    private let review = ReviewWindow()
+    private let review: ReviewWindow
     /// The service provider; `NSApp.servicesProvider` holds it weakly, so
     /// this keeps it alive.
     let service = FixWordService()
 
-    init(menuBar: MenuBarController) {
+    /// `settings` lets Review Corrections edit the example sentence.
+    init(menuBar: MenuBarController, settings: SettingsStore? = nil) {
         self.menuBar = menuBar
+        review = ReviewWindow(settings: settings)
         fixWord.onAdd = { [weak self] change, rules in self?.add(change, rules) }
         review.onChange = { [weak self] in self?.refresh() }
         service.onText = { [weak self] text in self?.fixWord.show(heard: text) }
@@ -29,6 +31,12 @@ final class CorrectionsUI {
     /// selection.
     func fixWordFromSelection() {
         fixWord.show(heard: FocusSnapshot.selectedWords() ?? "")
+    }
+
+    /// Opens Review Corrections, for example after a Wispr Flow import.
+    func showReview() {
+        review.show()
+        refresh()
     }
 
     func refresh() {

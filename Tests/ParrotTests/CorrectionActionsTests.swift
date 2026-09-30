@@ -66,6 +66,30 @@ final class CorrectionActionsTests: XCTestCase {
         XCTAssertEqual(try actions.pendingCount(), 0)
     }
 
+    func testAPendingPairShowsTheRulesRecordedWithIt() throws {
+        let local = LocalJudge(common: FixedCommonWords(words: []))
+        try actions.store.update { pairs in
+            // The LLM judge left only `case`; the local rules alone would add `replace`.
+            pairs.record(LearnedPair(word: "Qwilbo", heard: "Kwilbo", rules: [.casing], status: .pending, sources: [.watched],
+                                     seen: 3, firstSeen: Date(), lastSeen: Date()))
+            pairs.record(LearnedPair(word: "Zorblink", heard: nil, rules: [.prompt], status: .pending, sources: [.wisprDictionary],
+                                     seen: 2, firstSeen: Date(), lastSeen: Date()))
+        }
+        let reviews = try actions.pending(judge: local)
+        XCTAssertEqual(reviews.first { $0.pair.word == "Qwilbo" }?.verdict.rules, [.casing])
+        XCTAssertEqual(reviews.first { $0.pair.word == "Zorblink" }?.verdict.rules, [.prompt])
+    }
+
+    func testRecordedRulesStillObeyTheLocalVetoes() throws {
+        try actions.store.update { pairs in
+            // Recorded before the user kept "Kwilbo" elsewhere three times.
+            pairs.record(LearnedPair(word: "Qwilbo", heard: "Kwilbo", rules: [.replace, .casing], status: .pending, sources: [.wisprEdits],
+                                     seen: 3, firstSeen: Date(), lastSeen: Date(), keptHeard: 3))
+        }
+        let review = try XCTUnwrap(try actions.pending(judge: LocalJudge(common: FixedCommonWords(words: []))).first)
+        XCTAssertEqual(review.verdict.rules, [.casing])
+    }
+
     func testWarningsNameWhatARuleWouldChange() {
         let common = FixedCommonWords(words: ["link", "dev"])
         XCTAssertEqual(CorrectionActions.warnings(WordChange(heard: ["Link"], corrected: ["Zorblink"]), rules: [.replace], common: common),
