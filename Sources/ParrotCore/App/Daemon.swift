@@ -101,6 +101,13 @@ public enum Daemon {
         let menuBar = MenuBarController(modelID: model.id)
         let settingsWindow = SettingsWindow(store: settings)
         menuBar.onOpenSettings = { settingsWindow.show() }
+        // Fix Word, Review Corrections and Undo (ADR-006). The service works
+        // only when macOS knows the bundle, so only in the app role.
+        let corrections = CorrectionsUI(menuBar: menuBar)
+        if AppLaunch.isApp {
+            NSApp.servicesProvider = corrections.service
+            NSUpdateDynamicServices()
+        }
         menuBar.setHotkey(monitor.key)
         // Parrot.app sets up the hotkey, languages and permissions, and
         // explains each permission before macOS asks (#51).

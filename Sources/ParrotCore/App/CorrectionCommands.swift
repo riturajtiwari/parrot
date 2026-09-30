@@ -9,11 +9,11 @@ public enum CorrectionCommands {
     /// `apply`, asks about each proposal and writes the accepted rows.
     public static func importWispr(database: String?, apply: Bool, all: Bool) throws {
         let file = database.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? Paths.wisprDatabase
-        let store = LearnedStore()
+        let actions = CorrectionActions()
         let known = Set(LayeredDictionary().current().dictionary.terms.map { $0.lowercased() })
         let result: WisprImport
         do {
-            let learned = try store.load()
+            let learned = try actions.store.load()
             // What Parrot's own model wrote for the user's terms, saved by
             // `parrot-bench wispr-replay --save`.
             let whisper = learned.pairs
@@ -58,10 +58,10 @@ public enum CorrectionCommands {
             print("--apply asks about each proposal, so it needs a terminal.")
             throw SilentExit(1)
         }
-        try store.update { pairs in
+        try actions.store.update { pairs in
             for candidate in proposed { pairs.record(pending(candidate)) }
         }
-        try review(proposed, store: store)
+        try review(proposed, actions: actions)
     }
 
     /// Lists every learned pair with its status.
@@ -85,51 +85,55 @@ public enum CorrectionCommands {
     /// Removes the rows written for `word`, and marks its pairs rejected so
     /// that Parrot doesn't propose them again.
     public static func undo(word: String) throws {
-        let store = LearnedStore()
-        let matches = try store.load().pairs.filter { $0.word.caseInsensitiveCompare(word) == .orderedSame && $0.status == .added }
+        let actions = CorrectionActions()
+        let matches = try actions.added().filter { $0.word.caseInsensitiveCompare(word) == .orderedSame }
         guard !matches.isEmpty else {
             print("No added correction for \(word).")
             throw SilentExit(1)
         }
         for pair in matches {
-            try write(undoEdits(for: pair), to: pair.target ?? .dictionary)
-            try store.update { $0.decide(word: pair.word, heard: pair.heard, status: .rejected, rules: [], target: nil) }
+            try writing { try actions.undo(pair) }
             print("Removed \(pair.word)\(pair.heard.map { " ← \($0)" } ?? "").")
         }
     }
 
     // MARK: - Review
 
-    private static func review(_ proposed: [WisprImport.Candidate], store: LearnedStore) throws {
+    private static func review(_ proposed: [WisprImport.Candidate], actions: CorrectionActions) throws {
         var promptTerms: [String] = []
         print("\nFor each proposal: a = accept, r = reject, e = choose the rules, s = skip, q = quit.")
         for (index, candidate) in proposed.enumerated() {
             let change = candidate.change
+            let heard = change.heard.isEmpty ? nil : change.heardText
             print("\n[\(index + 1)/\(proposed.count)] \(line(candidate))")
-            for warning in warnings(change, rules: candidate.verdict.rules) { print("  ! \(warning)") }
-            var rules = candidate.verdict.rules
+            for warning in CorrectionActions.warnings(change, rules: candidate.verdict.rules) { print("  ! \(warning)") }
+            var rules: Set<CorrectionRule>? = candidate.verdict.rules
             answer: while true {
                 print("> ", terminator: "")
                 switch readLine()?.trimmingCharacters(in: .whitespaces).lowercased() {
                 case "a":
                     break answer
                 case "r":
-                    try store.update { $0.decide(word: change.correctedText, heard: heard(change), status: .rejected, rules: [], target: nil) }
-                    rules = []
+                    try actions.reject(word: change.correctedText, heard: heard)
+                    rules = nil
                     break answer
                 case "e":
                     print("Rules, comma-separated (replace, case, prompt), or none: ", terminator: "")
-                    let chosen = (readLine() ?? "").split(separator: ",").compactMap { CorrectionRule(rawValue: $0.trimmingCharacters(in: .whitespaces)) }
-                    rules = Set(chosen)
-                    let risks = warnings(change, rules: rules)
-                    guard !risks.isEmpty else { break answer }
+                    let chosen = Set((readLine() ?? "").split(separator: ",").compactMap { CorrectionRule(rawValue: $0.trimmingCharacters(in: .whitespaces)) })
+                    let risks = CorrectionActions.warnings(change, rules: chosen)
+                    guard !risks.isEmpty else {
+                        rules = chosen
+                        break answer
+                    }
                     for risk in risks { print("  ! \(risk)") }
                     print("Write it anyway? [y/N] ", terminator: "")
-                    if readLine()?.lowercased() == "y" { break answer }
-                    rules = candidate.verdict.rules
+                    if readLine()?.lowercased() == "y" {
+                        rules = chosen
+                        break answer
+                    }
                     print("Kept the proposal's rules. Choose again.")
                 case "s", "":
-                    rules = []
+                    rules = nil
                     break answer
                 case "q", nil:
                     try finish(promptTerms)
@@ -138,13 +142,8 @@ public enum CorrectionCommands {
                     print("a, r, e, s or q.")
                 }
             }
-            guard !rules.isEmpty else { continue }
-            let hadRow = DictionaryStore(file: Paths.dictionaryFile).current().dictionary.terms.contains(change.correctedText)
-            try write(edits(change, rules: rules), to: .dictionary)
-            try store.update {
-                $0.decide(word: change.correctedText, heard: heard(change), status: .added, rules: Array(rules),
-                          target: .dictionary, createdRow: !hadRow && !edits(change, rules: rules).isEmpty)
-            }
+            guard let rules, !rules.isEmpty else { continue }
+            try writing { try actions.accept(change, rules: rules, source: candidate.sources.sorted().first ?? .wisprEdits, seen: candidate.evidence.seen) }
             if rules.contains(.prompt) { promptTerms.append(change.correctedText) }
             print("  added")
         }
@@ -172,61 +171,21 @@ public enum CorrectionCommands {
         print("  saved as the English example sentence in settings.json")
     }
 
-    // MARK: - Rows
-
-    private static func heard(_ change: WordChange) -> String? {
-        change.heard.isEmpty ? nil : change.heardText
-    }
-
-    /// The dictionary edits for `rules`. Every row is also a case rule, so a
-    /// `replace` row covers `case`.
-    static func edits(_ change: WordChange, rules: Set<CorrectionRule>) -> [DictionaryEdit] {
-        if rules.contains(.replace), !change.heard.isEmpty {
-            return [.add(word: change.correctedText, replaces: [change.heardText])]
-        }
-        if rules.contains(.casing) {
-            return [.add(word: change.correctedText, replaces: [])]
-        }
-        return []
-    }
-
-    /// Removes what the pair wrote: the whole row when Parrot created it,
-    /// else only the heard form it added to the user's row.
-    static func undoEdits(for pair: LearnedPair) -> [DictionaryEdit] {
-        if pair.createdRow == true { return [.remove(word: pair.word, replaces: [])] }
-        if pair.rules.contains(.replace), let heard = pair.heard { return [.remove(word: pair.word, replaces: [heard])] }
-        return []
-    }
-
-    private static func write(_ edits: [DictionaryEdit], to target: LearnedPair.Target) throws {
-        guard !edits.isEmpty else { return }
-        let file = target == .dictionary ? Paths.dictionaryFile : Paths.learnedDictionaryFile
+    /// Prints a refused write and exits, instead of a stack of errors.
+    private static func writing(_ body: () throws -> Void) throws {
         do {
-            try DictionaryWriter(file: file).apply(edits)
+            try body()
         } catch let error as DictionaryWriteError {
             print("  not written: \(error)")
             throw SilentExit(1)
         }
     }
 
-    /// What a row would change beyond the word itself.
-    private static func warnings(_ change: WordChange, rules: Set<CorrectionRule>) -> [String] {
-        let common = EmbeddingCommonWords.shared
-        var result: [String] = []
-        if rules.contains(.replace), change.heard.count == 1, common.isCommon(change.heardText) {
-            result.append("every \"\(change.heardText)\" in every dictation would become \"\(change.correctedText)\"")
-        }
-        if !edits(change, rules: rules).isEmpty, common.isCommon(change.correctedText) {
-            result.append("every \"\(change.correctedText.lowercased())\" in any case would become \"\(change.correctedText)\"")
-        }
-        return result
-    }
-
     private static func pending(_ candidate: WisprImport.Candidate) -> LearnedPair {
         let now = Date()
         return LearnedPair(
             word: candidate.change.correctedText,
-            heard: heard(candidate.change),
+            heard: candidate.change.heard.isEmpty ? nil : candidate.change.heardText,
             rules: candidate.verdict.rules.sorted(),
             status: .pending,
             sources: candidate.sources.sorted(),

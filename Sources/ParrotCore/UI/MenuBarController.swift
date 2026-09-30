@@ -5,7 +5,8 @@ import AppKit
 /// (since we run as `.accessory` — no dock icon, no main window).
 ///
 /// The menu has named slots, top to bottom: `statusLine`, `modelLine`,
-/// `grantPermissionsItem`, `settingsItem`, `checkForUpdatesItem`, `quitItem`. Features update a slot
+/// `grantPermissionsItem`, `fixWordItem`, `reviewItem`, `undoLearnedItem`,
+/// `settingsItem`, `checkForUpdatesItem`, `quitItem`. Features update a slot
 /// rather than rebuilding the menu.
 @MainActor
 final class MenuBarController {
@@ -21,6 +22,18 @@ final class MenuBarController {
     let grantPermissionsItem: NSMenuItem
     /// What `grantPermissionsItem` does; set by `OnboardingWindow`.
     var onGrantPermissions: (() -> Void)?
+    /// Slot: Fix Word… (ADR-006): the selected word and what it should be.
+    let fixWordItem: NSMenuItem
+    var onFixWord: (() -> Void)?
+    /// Slot: Review Corrections…, with the number waiting.
+    let reviewItem: NSMenuItem
+    var onReview: (() -> Void)?
+    /// Slot: undoes the correction Parrot added last. Hidden until there is one.
+    let undoLearnedItem: NSMenuItem
+    var onUndoLearned: (() -> Void)?
+    /// Called just before the menu opens, so counts are current.
+    var onMenuOpen: (() -> Void)?
+    private let menuWatcher = MenuOpenWatcher()
     /// Slot: opens the Settings window (#41) through `onOpenSettings`.
     let settingsItem: NSMenuItem
     /// Called by Settings…; set by the daemon, which owns the window.
@@ -63,6 +76,15 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        fixWordItem = NSMenuItem(title: "Fix Word…", action: #selector(fixWordClicked), keyEquivalent: "")
+        menu.addItem(fixWordItem)
+        reviewItem = NSMenuItem(title: "Review Corrections…", action: #selector(reviewClicked), keyEquivalent: "")
+        menu.addItem(reviewItem)
+        undoLearnedItem = NSMenuItem(title: "Undo", action: #selector(undoLearnedClicked), keyEquivalent: "")
+        undoLearnedItem.isHidden = true
+        menu.addItem(undoLearnedItem)
+        menu.addItem(.separator())
+
         settingsItem = NSMenuItem(title: "Settings…", action: #selector(settingsClicked), keyEquivalent: ",")
         menu.addItem(settingsItem)
 
@@ -86,11 +108,27 @@ final class MenuBarController {
         settingsItem.target = self
         checkForUpdatesItem.target = self
         grantPermissionsItem.target = self
+        fixWordItem.target = self
+        reviewItem.target = self
+        undoLearnedItem.target = self
+        menu.delegate = menuWatcher
+        menuWatcher.onOpen = { [weak self] in self?.onMenuOpen?() }
         configureButton()
     }
 
     func setStatus(_ text: String) {
         statusLine.title = text
+    }
+
+    /// Shows how many corrections wait for review.
+    func setReviewCount(_ count: Int) {
+        reviewItem.title = count > 0 ? "Review Corrections (\(count))…" : "Review Corrections…"
+    }
+
+    /// Offers Undo for the word Parrot added last, or hides it.
+    func setLastLearned(_ word: String?) {
+        undoLearnedItem.title = word.map { "Undo “\($0)”" } ?? "Undo"
+        undoLearnedItem.isHidden = word == nil
     }
 
     func setHotkeyHealth(_ health: HotkeyHealth) {
@@ -152,6 +190,28 @@ final class MenuBarController {
 
     @objc private func quitClicked() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func fixWordClicked() {
+        onFixWord?()
+    }
+
+    @objc private func reviewClicked() {
+        onReview?()
+    }
+
+    @objc private func undoLearnedClicked() {
+        onUndoLearned?()
+    }
+}
+
+/// Tells the controller that the menu is about to open.
+@MainActor
+private final class MenuOpenWatcher: NSObject, NSMenuDelegate {
+    var onOpen: (() -> Void)?
+
+    func menuWillOpen(_ menu: NSMenu) {
+        onOpen?()
     }
 }
 

@@ -205,9 +205,9 @@ final class LearnedStoreTests: XCTestCase {
         var created = pair("Qwilbo", "Kwilbo")
         created.rules = [.replace, .casing]
         created.createdRow = true
-        XCTAssertEqual(CorrectionCommands.undoEdits(for: created), [.remove(word: "Qwilbo", replaces: [])])
+        XCTAssertEqual(CorrectionActions.undoEdits(for: created), [.remove(word: "Qwilbo", replaces: [])])
         created.createdRow = false
-        XCTAssertEqual(CorrectionCommands.undoEdits(for: created), [.remove(word: "Qwilbo", replaces: ["Kwilbo"])])
+        XCTAssertEqual(CorrectionActions.undoEdits(for: created), [.remove(word: "Qwilbo", replaces: ["Kwilbo"])])
     }
 }
 
