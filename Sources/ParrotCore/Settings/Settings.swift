@@ -16,6 +16,8 @@ struct Settings: Codable, Equatable {
     var audio = AudioSettings()
     var stats = StatsSettings()
     var onboarding = OnboardingSettings()
+    /// Fork (ADR-006): learned corrections and the LLM judge.
+    var corrections = CorrectionSettings()
 
     init() {}
 
@@ -28,5 +30,6 @@ struct Settings: Codable, Equatable {
         audio = try c.decodeIfPresent(AudioSettings.self, forKey: .audio) ?? AudioSettings()
         stats = try c.decodeIfPresent(StatsSettings.self, forKey: .stats) ?? StatsSettings()
         onboarding = try c.decodeIfPresent(OnboardingSettings.self, forKey: .onboarding) ?? OnboardingSettings()
+        corrections = try c.decodeIfPresent(CorrectionSettings.self, forKey: .corrections) ?? CorrectionSettings()
     }
 }

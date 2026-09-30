@@ -75,6 +75,8 @@ struct SettingsView: View {
                 }
                 Divider()
                 TranscriptionSection(store: store)
+                Divider()
+                CorrectionsSection(store: store)
             }
             .padding(.horizontal, 32)
             .padding(.top, 36)

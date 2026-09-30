@@ -40,6 +40,8 @@ struct CorrectionVerdict: Equatable, Sendable {
     var rules: Set<CorrectionRule>
     var similarity: Double
     var reasons: [String]
+    /// The LLM judge's confidence, from 0 to 1; nil from the local rules.
+    var confidence: Double?
 
     var learns: Bool { !rules.isEmpty }
 }
@@ -179,6 +181,18 @@ struct LocalJudge: Sendable {
                 || inner.contains { "-._".contains($0) }
                 || (first.isUppercase && !(atSentenceStart && index == 0))
         }
+    }
+
+    /// A word's shape in one word, for the LLM judge.
+    static func shapeName(_ word: String, atSentenceStart: Bool = false) -> String {
+        let letters = word.filter(\.isLetter)
+        if word.contains(where: \.isNumber) { return "has digits" }
+        if letters.count >= 2, letters.allSatisfy(\.isUppercase) { return "all capitals" }
+        if letters.dropFirst().contains(where: \.isUppercase) { return "inner capitals" }
+        if word.split(separator: " ").contains(where: { $0.first?.isUppercase == true }) {
+            return atSentenceStart ? "capitalized at a sentence start" : "capitalized"
+        }
+        return "lowercase"
     }
 
     /// Digits with punctuation or an ordinal ending ("5.15", "15th", "2024").

@@ -6,12 +6,13 @@ import Foundation
 /// the user accepts it at the prompt.
 public enum CorrectionCommands {
     /// Reads Wispr Flow's database and prints what it would learn. With
-    /// `apply`, asks about each proposal and writes the accepted rows.
-    public static func importWispr(database: String?, apply: Bool, all: Bool) throws {
+    /// `apply`, asks about each proposal and writes the accepted rows. With
+    /// `llm`, the LLM judge set in Settings reviews the proposals first.
+    public static func importWispr(database: String?, apply: Bool, all: Bool, llm: Bool = false) throws {
         let file = database.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? Paths.wisprDatabase
         let actions = CorrectionActions()
         let known = Set(LayeredDictionary().current().dictionary.terms.map { $0.lowercased() })
-        let result: WisprImport
+        var result: WisprImport
         do {
             let learned = try actions.store.load()
             // What Parrot's own model wrote for the user's terms, saved by
@@ -35,6 +36,7 @@ public enum CorrectionCommands {
             print(error)
             throw SilentExit(1)
         }
+        if llm { try judgeWithLLM(&result, known: known) }
 
         let s = result.summary
         print("Wispr Flow: \(s.dictionaryRows) dictionary rows (\(s.snippets) snippets skipped), \(s.dictations) dictations, \(s.edited) edited, \(s.rewrites) rewrites.")
@@ -62,6 +64,29 @@ public enum CorrectionCommands {
             for candidate in proposed { pairs.record(pending(candidate)) }
         }
         try review(proposed, actions: actions)
+    }
+
+    /// Lets the LLM judge in Settings review the open candidates, in batches.
+    private static func judgeWithLLM(_ result: inout WisprImport, known: Set<String>) throws {
+        let settings = CorrectionSettings.saved()
+        let client: LLMClient
+        do {
+            client = try LLMClients.make(settings)
+        } catch {
+            print("LLM judge: \(error). Set a provider in Settings → Corrections, or `parrot llm set-key`.")
+            throw SilentExit(1)
+        }
+        let open = result.candidates.indices.filter { result.candidates[$0].decided == nil }
+        let items = open.map { LLMJudge.Item(change: result.candidates[$0].change, evidence: result.candidates[$0].evidence) }
+        print("LLM judge: \(settings.provider.displayName), \(settings.resolvedModel ?? "?"), \(items.count) pairs…")
+        let judge = LLMJudge(client: client, local: LocalJudge())
+        let started = Date()
+        let outcome = blocking { await judge.judge(items, known: known) }
+        for (index, verdict) in zip(open, outcome.verdicts) {
+            result.candidates[index].verdict = verdict
+        }
+        print(String(format: "LLM judge: done in %.0f s%@", Date().timeIntervalSince(started),
+                     outcome.failures.isEmpty ? "" : ", \(outcome.failures.count) failed request(s) kept the local verdict: \(outcome.failures.map(\.description).joined(separator: "; "))"))
     }
 
     /// Lists every learned pair with its status.
@@ -169,6 +194,18 @@ public enum CorrectionCommands {
             settings.update { $0.dictionary.examples["en"] = sentence }
         }
         print("  saved as the English example sentence in settings.json")
+    }
+
+    /// Runs `body` to completion from synchronous command code.
+    static func blocking<T>(_ body: @escaping @Sendable () async -> T) -> T {
+        let sem = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result: T?
+        Task.detached {
+            result = await body()
+            sem.signal()
+        }
+        sem.wait()
+        return result!
     }
 
     /// Prints a refused write and exits, instead of a stack of errors.

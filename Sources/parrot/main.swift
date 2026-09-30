@@ -9,7 +9,7 @@ struct Parrot: ParsableCommand {
         commandName: "parrot",
         abstract: "Minimal macOS dictation daemon. Hold a key (fn by default), speak, release.",
         version: AppBundle.version,
-        subcommands: [Run.self, Setup.self, Doctor.self, Models.self, Install.self, Import.self, Corrections.self],
+        subcommands: [Run.self, Setup.self, Doctor.self, Models.self, Install.self, Import.self, Corrections.self, LLM.self],
         defaultSubcommand: Run.self
     )
 }
@@ -190,8 +190,53 @@ struct Import: ParsableCommand {
 
         @Flag(name: .long, help: "Also list the pairs that are not learned.") var all: Bool = false
 
+        @Flag(name: .long, help: "Let the LLM judge from Settings review the proposals first. Sends word pairs only.") var llm: Bool = false
+
         func run() throws {
-            try exiting { try CorrectionCommands.importWispr(database: db, apply: apply, all: all) }
+            try exiting { try CorrectionCommands.importWispr(database: db, apply: apply, all: all, llm: llm) }
+        }
+    }
+}
+
+/// The LLM judge's key and a check that it answers (ADR-006).
+struct LLM: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "llm",
+        abstract: "Set up the LLM judge for learned corrections.",
+        subcommands: [SetKey.self, RemoveKey.self, Models.self, Test.self]
+    )
+
+    struct SetKey: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Save a provider's API key in the Keychain. Reads it without echo.")
+        @Argument(help: "claude, openai, gemini, openrouter, ollama, lmstudio or custom.") var provider: String
+
+        func run() throws {
+            try exiting { try LLMCommands.setKey(provider: provider) }
+        }
+    }
+
+    struct RemoveKey: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Remove a provider's API key from the Keychain.")
+        @Argument(help: "The provider.") var provider: String
+
+        func run() throws {
+            try exiting { try LLMCommands.removeKey(provider: provider) }
+        }
+    }
+
+    struct Models: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List the models of the provider set in Settings.")
+
+        func run() throws {
+            try exiting { try LLMCommands.models() }
+        }
+    }
+
+    struct Test: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Ask the judge about three made-up pairs.")
+
+        func run() throws {
+            try exiting { try LLMCommands.test() }
         }
     }
 }
