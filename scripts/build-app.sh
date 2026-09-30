@@ -41,8 +41,11 @@ if [ -z "$IDENTITY" ]; then
 fi
 
 echo "→ building parrot $VERSION (release, arm64)"
-swift build -c release --arch arm64 --product parrot
-BIN="$(swift build -c release --arch arm64 --show-bin-path)/parrot"
+# --disable-keychain: every dependency is public, and SwiftPM otherwise asks
+# the login Keychain for github.com credentials, which can wait forever on
+# a hidden access prompt.
+swift build -c release --arch arm64 --disable-keychain --product parrot
+BIN="$(swift build -c release --arch arm64 --disable-keychain --show-bin-path)/parrot"
 
 echo "→ assembling $APP"
 rm -rf "$APP"
