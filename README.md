@@ -64,6 +64,14 @@ swift build -c release && swift test
 scripts/dev-install.sh      # build, sign, install Parrot.app, link the CLI
 ```
 
+This fork signs with a Developer ID or, without one, a free Apple Development certificate, so the Microphone and Accessibility grants survive rebuilds. To make the certificate, open Xcode → **Settings → Accounts**, add your Apple ID, select your **Personal Team**, click **Manage Certificates…**, and add **Apple Development**. If `security find-identity -v -p codesigning` then finds no valid identity, the Mac lacks Apple's WWDR G3 intermediate certificate. Xcode ships a copy:
+
+```sh
+security import /Applications/Xcode.app/Contents/SharedFrameworks/DVTFoundation.framework/Versions/A/Resources/AppleWWDRCA-2030.cer -k ~/Library/Keychains/login.keychain-db
+```
+
+When `/usr/local/bin` is not writable, `PARROT_LINK_DIR=~/.local/bin scripts/dev-install.sh` links the command there, with no `sudo`.
+
 ## 7. License
 
 [MIT](LICENSE)

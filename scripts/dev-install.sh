@@ -16,7 +16,8 @@
 # binary already at that path (an old CLI install) is only replaced after you
 # say yes. A running copy is quit and reopened.
 #
-#   PARROT_SIGN_IDENTITY  signing identity (default: the keychain's Developer ID)
+#   PARROT_SIGN_IDENTITY  signing identity (default: the keychain's Developer ID,
+#                         else its Apple Development identity)
 #   PARROT_INSTALL_DIR    where Parrot.app goes
 #   PARROT_LINK_DIR       where the parrot link goes (default /usr/local/bin;
 #                         set it empty to skip the link)
