@@ -37,6 +37,17 @@ package final class LayeredDictionary: DictionarySource, @unchecked Sendable {
         return loaded
     }
 
+    /// The replacement pass, for tools outside ParrotCore such as
+    /// `parrot-bench`.
+    package func apply(to text: String) -> String {
+        current().replacer.apply(to: text)
+    }
+
+    /// Every word the merged dictionary spells, for tools that score it.
+    package var words: [String] {
+        current().dictionary.terms
+    }
+
     /// `base` followed by what `overlay` adds without touching `base`.
     static func merged(_ base: UserDictionary, _ overlay: UserDictionary) -> UserDictionary {
         guard overlay != .empty else { return base }

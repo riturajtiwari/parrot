@@ -13,13 +13,23 @@ public enum CorrectionCommands {
         let known = Set(LayeredDictionary().current().dictionary.terms.map { $0.lowercased() })
         let result: WisprImport
         do {
+            let learned = try store.load()
+            // What Parrot's own model wrote for the user's terms, saved by
+            // `parrot-bench wispr-replay --save`.
+            let whisper = learned.pairs
+                .filter { $0.status == .pending && $0.sources.contains(.whisper) }
+                .compactMap { pair -> (change: WordChange, seen: Int)? in
+                    guard let heard = pair.heard else { return nil }
+                    return (WordChange(heard: WordDiff.words(heard).map(\.text), corrected: WordDiff.words(pair.word).map(\.text)), pair.seen)
+                }
             let db = try WisprDatabase(file: file)
             result = WisprImport(
                 dictionary: try db.dictionary(),
                 dictations: try db.dictations(),
+                whisper: whisper,
                 judge: LocalJudge(),
                 known: known,
-                decided: try store.load()
+                decided: learned
             )
         } catch let error as WisprError {
             print(error)

@@ -30,9 +30,12 @@ struct WisprImport {
     var candidates: [Candidate] = []
     var summary = Summary()
 
+    /// - Parameter whisper: what Parrot's own model wrote for the user's
+    ///   terms, from `parrot-bench wispr-replay`, with counts.
     init(
         dictionary: [WisprDatabase.DictionaryRow],
         dictations: [WisprDatabase.Dictation],
+        whisper: [(change: WordChange, seen: Int)] = [],
         judge: LocalJudge,
         known: Set<String> = [],
         decided: LearnedPairs = LearnedPairs()
@@ -72,6 +75,10 @@ struct WisprImport {
             } else {
                 add(WordChange(heard: [], corrected: words(row.phrase)), seen: max(row.uses, 1), manual: true, source: .wisprDictionary)
             }
+        }
+
+        for (change, seen) in whisper {
+            add(change, seen: seen, manual: false, source: .whisper)
         }
 
         // Kept text: what each field held in the end. Only its word keys

@@ -11,9 +11,36 @@ struct Bench: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "parrot-bench",
         abstract: "Measure latency: the model over recordings, or microphone capture.",
-        subcommands: [BenchTranscription.self, BenchCapture.self, BenchAXProbe.self],
+        subcommands: [BenchTranscription.self, BenchCapture.self, BenchAXProbe.self, BenchWisprReplay.self],
         defaultSubcommand: BenchTranscription.self
     )
+}
+
+/// Wispr Flow's recorded dictations through Parrot's model (ADR-006).
+struct BenchWisprReplay: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "wispr-replay",
+        abstract: "Replay Wispr Flow's recorded dictations through Parrot's model.",
+        discussion: """
+            Reads Wispr Flow's database read-only, decodes each recording in \
+            memory, and transcribes it with and without the dictionary. \
+            Prints the word error rate against the text you kept, how often \
+            the model wrote your terms exactly, and what it wrote instead. \
+            Never prints a sentence.
+            """
+    )
+
+    @Option(name: .long, help: "Wispr Flow's flow.sqlite. Defaults to the one in Application Support.") var db: String?
+
+    @Option(name: .long, help: "Model id to use. Defaults to the recommended model.") var model: String?
+
+    @Option(name: .long, help: "Replay at most this many recordings.") var limit: Int?
+
+    @Flag(name: .long, help: "Save the mishearings to corrections.json for `parrot import wispr`.") var save: Bool = false
+
+    func run() throws {
+        try exiting { try WisprReplayBench.run(WisprReplayOptions(database: db, model: model, limit: limit, save: save)) }
+    }
 }
 
 /// What each app's focused text field offers over Accessibility (ADR-006).
