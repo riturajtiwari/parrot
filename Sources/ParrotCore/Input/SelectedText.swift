@@ -17,3 +17,26 @@ extension FocusSnapshot {
         return text
     }
 }
+
+extension FocusedElement {
+    /// The selection, in UTF-16 units, or nil when the app doesn't say.
+    func selectedRange() -> CFRange? {
+        var value: CFTypeRef?
+        var range = CFRange()
+        guard AXUIElementCopyAttributeValue(ref, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXValueGetTypeID(),
+              AXValueGetValue(value as! AXValue, .cfRange, &range), range.location >= 0 else { return nil }
+        return range
+    }
+}
+
+/// A transcript that was pasted at the cursor, for the edit watcher
+/// (ADR-006). The text stays in memory.
+struct InjectedText {
+    /// What was pasted, with the spaces `Spacing` added.
+    var text: String
+    var pid: pid_t?
+    var element: FocusedElement
+    /// The selection before the paste, where the paste starts.
+    var selectionBefore: CFRange?
+}

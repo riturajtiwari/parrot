@@ -9,6 +9,8 @@
 
 Hold `fn`, speak, release. Your words appear at the cursor. On-device dictation for macOS.
 
+> **This fork** learns the spellings you correct, imports what Wispr Flow learned, and can ask an LLM of your choice to judge each learned word pair. It has its own bundle ID (`io.github.riturajtiwari.parrot`) and no automatic updates. Build it with `scripts/dev-install.sh`. See [docs/corrections.md](docs/corrections.md) and [ADR-006](docs/decisions/006-learned-corrections.md).
+
 ## 1. Install
 
 Download [Parrot.dmg](https://github.com/humanitas-labs/parrot/releases/latest/download/Parrot.dmg), drag Parrot to Applications, and open it. Turn on Parrot when macOS asks for Accessibility and the microphone. The first start downloads the speech model (about 150 MB).

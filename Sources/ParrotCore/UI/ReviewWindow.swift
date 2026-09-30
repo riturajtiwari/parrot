@@ -72,10 +72,19 @@ final class ReviewModel: ObservableObject {
     }
 
     func accept(_ review: CorrectionActions.Review) {
+        if review.pair.status == .suspect {
+            run { try self.actions.keep(review.pair) }
+            return
+        }
         run { try self.actions.accept(review.change, rules: self.rules(review), source: review.pair.sources.first ?? .wisprEdits, seen: review.pair.seen) }
     }
 
+    /// No to a pending pair; for a suspect one, removes its rows too.
     func reject(_ review: CorrectionActions.Review) {
+        if review.pair.status == .suspect {
+            run { try self.actions.undo(review.pair) }
+            return
+        }
         run { try self.actions.reject(word: review.pair.word, heard: review.pair.heard) }
     }
 

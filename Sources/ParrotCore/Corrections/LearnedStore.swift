@@ -46,6 +46,9 @@ struct LearnedPair: Codable, Equatable, Sendable {
     /// Parrot created the word's row, so Undo removes the whole row. When
     /// the row was there before, Undo removes only the heard form.
     var createdRow: Bool?
+    /// The rules first proposed, kept after the user decides, so the hybrid
+    /// gate can measure how often the proposals were right.
+    var proposed: [CorrectionRule]?
 
     /// The identity of a pair: the word and the heard form, in any case.
     var key: String { Self.key(word: word, heard: heard) }
@@ -78,8 +81,13 @@ struct LearnedPairs: Codable, Equatable, Sendable {
             pairs[index].seen = max(pairs[index].seen, pair.seen)
             pairs[index].sources = Array(Set(pairs[index].sources + pair.sources)).sorted()
             pairs[index].lastSeen = max(pairs[index].lastSeen, pair.lastSeen)
-            if pairs[index].status == .pending { pairs[index].rules = pair.rules }
+            if pairs[index].status == .pending {
+                pairs[index].rules = pair.rules
+                pairs[index].proposed = pair.proposed ?? pair.rules
+            }
         } else {
+            var pair = pair
+            if pair.proposed == nil { pair.proposed = pair.rules }
             pairs.append(pair)
         }
     }

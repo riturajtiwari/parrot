@@ -148,18 +148,31 @@ public enum Daemon {
             return context
         }
 
+        // The edit watcher (ADR-006) follows each pasted transcript in the
+        // watched apps and hands the corrections it sees to the learner.
+        let delivery = TextDelivery(mode: options.injectMode)
+        let learner = EditLearner(settings: { settings.current.corrections })
+        learner.onLearned = { word in
+            corrections.refresh()
+            menuBar.setStatus("learned \(word)")
+        }
+        learner.onQueued = { corrections.refresh() }
+        let watcher = EditWatcher(settings: { settings.current.corrections }, learner: learner)
+        delivery.onInjected = { watcher.watch($0) }
+
         // Overlay first, then menu bar: the order the UI updated in before.
         var observers: [DictationObserver] = []
         if let overlay { observers.append(overlay) }
         observers.append(menuBar)
         observers.append(LatencyLog())
+        observers.append(watcher)
         let controller = DictationController(
             capture: capture,
             transcriber: transcriber,
             processors: [DictionaryProcessor(store: layered)],
             observers: observers,
             dumpWav: options.dumpWav,
-            delivery: TextDelivery(mode: options.injectMode),
+            delivery: delivery,
             context: dictionaryContext
         )
         switcher.controller = controller

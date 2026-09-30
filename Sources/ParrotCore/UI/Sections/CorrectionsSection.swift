@@ -26,6 +26,9 @@ struct CorrectionsSection: View {
                 }
             }
             caption(Self.explanation(settings.learning))
+            if settings.learning == .hybrid {
+                caption(HybridGate.status((try? LearnedStore().load().pairs) ?? []).summary)
+            }
 
             PillRow("Judge") {
                 PillMenu(title: provider.displayName) {

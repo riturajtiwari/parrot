@@ -26,7 +26,8 @@ Last updated: `2026.09.29`
 
   Context words go only when you turn on `sendContext`. Requests use an ephemeral `URLSession`. Logs never hold a request body or a response body. The API key is in the Keychain, never in `settings.json`.
 - **No keystrokes.** The watcher uses Accessibility reads only. The event tap stays `flagsChanged` only (ADR-003).
-- **Wispr Flow import.** Parrot reads Wispr's database through the SQLite backup API into memory. It never writes to Wispr's files, and it never writes a copy to disk.
+- **Wispr Flow import.** Parrot opens Wispr's database read-only: as an ordinary reader while Wispr Flow runs, and as an immutable file when it is quit. All reads run in one transaction. It never writes to Wispr's files, and it never writes a copy to disk.
+- **Common words.** The English word embedding that ships with macOS decides what is a common word. It needs no download and no bundled list.
 
 ## 2. Rationale
 

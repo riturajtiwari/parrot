@@ -42,6 +42,9 @@ enum DeliveryDecision: Equatable {
 @MainActor
 final class TextDelivery {
     private let injector: TextInjector
+    /// Fork (ADR-006): called after each paste at the cursor, for the edit
+    /// watcher. Never called for a clipboard fallback or a secure field.
+    var onInjected: ((InjectedText) -> Void)?
 
     init(mode: InjectMode) {
         self.injector = TextInjector(mode: mode)
@@ -57,7 +60,11 @@ final class TextDelivery {
             let spaced = Spacing.spaced(text, before: before)
             // The kind of character only: the log never carries text.
             Log.info("  before cursor: \(before.kind)\(spaced.first == " " && text.first != " " ? " · leading space" : "")")
+            let selection = onInjected == nil ? nil : now.element?.selectedRange()
             injector.inject(spaced)
+            if let onInjected, let element = now.element {
+                onInjected(InjectedText(text: spaced, pid: now.pid, element: element, selectionBefore: selection))
+            }
         case .discardSecure:
             let when = focusAtStart?.isSecure == true ? "recording start" : "delivery"
             Log.info("  secure field focused at \(when); transcript discarded")

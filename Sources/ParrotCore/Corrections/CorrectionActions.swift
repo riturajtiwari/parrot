@@ -42,6 +42,11 @@ struct CorrectionActions {
         }
     }
 
+    /// Keeps a suspect pair: its rows stay, and it is added again.
+    func keep(_ pair: LearnedPair) throws {
+        try store.update { $0.decide(word: pair.word, heard: pair.heard, status: .added, rules: pair.rules, target: pair.target) }
+    }
+
     /// Records that the user said no. Parrot never proposes the pair again.
     func reject(word: String, heard: String?) throws {
         try store.update { $0.decide(word: word, heard: heard, status: .rejected, rules: [], target: nil) }
@@ -56,22 +61,28 @@ struct CorrectionActions {
         try reject(word: pair.word, heard: pair.heard)
     }
 
-    /// The pending pairs, most seen first, each judged again.
+    /// The pending pairs, most seen first, each judged again, and the added
+    /// pairs the user reverted since (suspect), first.
     func pending(judge: LocalJudge = LocalJudge()) throws -> [Review] {
         let known = Set(Self.words(in: dictionary).map { $0.lowercased() })
         return try store.load().pairs
-            .filter { $0.status == .pending }
-            .sorted { $0.seen > $1.seen }
+            .filter { $0.status == .pending || $0.status == .suspect }
+            .sorted { ($0.status == .suspect ? 1 : 0, $0.seen) > ($1.status == .suspect ? 1 : 0, $1.seen) }
             .map { pair in
                 let change = WordChange(heard: pair.heard.map { WordDiff.words($0).map(\.text) } ?? [],
                                         corrected: WordDiff.words(pair.word).map(\.text))
-                return Review(pair: pair, change: change, verdict: judge.judge(change, evidence: CorrectionEvidence(seen: pair.seen), known: known))
+                var verdict = judge.judge(change, evidence: CorrectionEvidence(seen: pair.seen), known: known)
+                if pair.status == .suspect {
+                    verdict.rules = Set(pair.rules)
+                    verdict.reasons.insert("you reverted what this rule wrote; Reject removes it", at: 0)
+                }
+                return Review(pair: pair, change: change, verdict: verdict)
             }
     }
 
     /// How many pairs wait for review, without judging them.
     func pendingCount() throws -> Int {
-        try store.load().pairs.filter { $0.status == .pending }.count
+        try store.load().pairs.filter { $0.status == .pending || $0.status == .suspect }.count
     }
 
     /// Added pairs, newest first.

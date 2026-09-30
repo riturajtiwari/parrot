@@ -78,6 +78,15 @@ struct CorrectionSettings: Codable, Equatable, Sendable {
     var maxPerDictation = 4
     /// How long the edit watcher follows a field after a paste.
     var watchSeconds = 60
+    /// The apps whose fields the edit watcher follows, by bundle id. Apps
+    /// whose text fields `parrot-bench ax-probe` shows as readable. Never
+    /// terminals, code editors or password managers.
+    var watchedApps = CorrectionSettings.defaultWatchedApps
+
+    static let defaultWatchedApps = [
+        "com.apple.TextEdit", "com.apple.Notes", "com.apple.mail", "com.apple.MobileSMS",
+        "com.apple.Safari", "com.google.Chrome", "com.tinyspeck.slackmacgap", "com.microsoft.Outlook",
+    ]
 
     init() {}
 
@@ -90,6 +99,7 @@ struct CorrectionSettings: Codable, Equatable, Sendable {
         sendContext = try c.decodeIfPresent(Bool.self, forKey: .sendContext) ?? false
         maxPerDictation = try c.decodeIfPresent(Int.self, forKey: .maxPerDictation) ?? 4
         watchSeconds = try c.decodeIfPresent(Int.self, forKey: .watchSeconds) ?? 60
+        watchedApps = try c.decodeIfPresent([String].self, forKey: .watchedApps) ?? Self.defaultWatchedApps
     }
 
     /// The model to ask, or nil when there is none to ask.
