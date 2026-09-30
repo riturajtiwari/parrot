@@ -31,7 +31,7 @@ final class EmbeddingCommonWords: CommonWords, @unchecked Sendable {
         let words = text.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
         guard !words.isEmpty else { return true }
         return words.allSatisfy { word in
-            if word.count <= 2 || FunctionWords.all.contains(word) { return true }
+            if FunctionWords.all.contains(word) { return true }
             guard let embedding else { return true }
             lock.lock()
             defer { lock.unlock() }
@@ -46,7 +46,7 @@ struct FixedCommonWords: CommonWords {
 
     func isCommon(_ text: String) -> Bool {
         text.lowercased().split(whereSeparator: { $0.isWhitespace }).allSatisfy { word in
-            word.count <= 2 || FunctionWords.all.contains(String(word)) || words.contains(String(word))
+            FunctionWords.all.contains(String(word)) || words.contains(String(word))
         }
     }
 }

@@ -9,7 +9,7 @@ struct Parrot: ParsableCommand {
         commandName: "parrot",
         abstract: "Minimal macOS dictation daemon. Hold a key (fn by default), speak, release.",
         version: AppBundle.version,
-        subcommands: [Run.self, Setup.self, Doctor.self, Models.self, Install.self],
+        subcommands: [Run.self, Setup.self, Doctor.self, Models.self, Install.self, Import.self, Corrections.self],
         defaultSubcommand: Run.self
     )
 }
@@ -164,6 +164,56 @@ struct Install: ParsableCommand {
             } else {
                 try LoginItem.install()
             }
+        }
+    }
+}
+
+/// Learned corrections from another dictation app (ADR-006).
+struct Import: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Learn spelling corrections from another dictation app.",
+        subcommands: [Wispr.self]
+    )
+
+    struct Wispr: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Learn from Wispr Flow's dictionary and your edits there. Reads it; never writes to it.",
+            discussion: """
+                Prints what Parrot would learn, one word pair per row. Nothing is \
+                written until you run it with --apply, which asks about each row.
+                """
+        )
+
+        @Option(name: .long, help: "Wispr Flow's flow.sqlite. Defaults to the one in Application Support.") var db: String?
+
+        @Flag(name: .long, help: "Ask about each proposal and write the ones you accept.") var apply: Bool = false
+
+        @Flag(name: .long, help: "Also list the pairs that are not learned.") var all: Bool = false
+
+        func run() throws {
+            try exiting { try CorrectionCommands.importWispr(database: db, apply: apply, all: all) }
+        }
+    }
+}
+
+/// What Parrot learned, and Undo (ADR-006).
+struct Corrections: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Show or undo learned corrections.",
+        subcommands: [List.self, Undo.self]
+    )
+
+    struct List: ParsableCommand {
+        func run() throws {
+            try exiting { try CorrectionCommands.list() }
+        }
+    }
+
+    struct Undo: ParsableCommand {
+        @Argument(help: "The word whose learned rows to remove.") var word: String
+
+        func run() throws {
+            try exiting { try CorrectionCommands.undo(word: word) }
         }
     }
 }

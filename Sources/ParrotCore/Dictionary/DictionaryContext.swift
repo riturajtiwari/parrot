@@ -6,7 +6,7 @@ import Foundation
 /// hears it, so every example sentence goes along and the engine picks the one
 /// for the language it settled on.
 package struct DictionaryContext {
-    let store: DictionaryStore
+    let store: DictionarySource
     /// The language being spoken, when known. Without it the prompt is left
     /// to the engine, from `examples`.
     let language: String?
@@ -14,7 +14,7 @@ package struct DictionaryContext {
     /// (`dictionary.examples`).
     let examples: [String: String]
 
-    package init(store: DictionaryStore, language: String?, examples: [String: String] = [:]) {
+    package init(store: DictionarySource, language: String?, examples: [String: String] = [:]) {
         self.store = store
         self.language = language
         self.examples = examples

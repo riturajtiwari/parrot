@@ -47,6 +47,10 @@ final class WordDiffTests: XCTestCase {
         XCTAssertEqual(changes, [])
     }
 
+    func testInvisibleCharactersAreNotPartOfAWord() {
+        XCTAssertEqual(WordDiff.words("into master\u{FEFF} now\u{200B}").map(\.text), ["into", "master", "now"])
+    }
+
     func testSentenceStartsAreMarked() {
         let changes = WordDiff.changes(from: "Done. Master is green now", to: "Done. master is green now")
         XCTAssertEqual(changes.count, 1)
@@ -147,5 +151,21 @@ final class LocalJudgeTests: XCTestCase {
 
     func testAKnownWordNeedsNoNewCase() {
         XCTAssertEqual(verdict("Kwilbo", "Qwilbo", known: ["qwilbo"]).rules, [.replace])
+    }
+
+    func testNumbersPathsAndPhrasesAreNotSpellings() {
+        XCTAssertEqual(verdict("15th", "18th").kind, .content)
+        XCTAssertEqual(verdict("5.15", "A5.15").rules, [])
+        XCTAssertEqual(verdict("PHASE4.pen", "designs/IRL.pen").kind, .noise)
+        XCTAssertEqual(verdict("format", "for Zorb").rules, [])
+    }
+
+    /// Every row is a case rule for every dictation, so a word only gets a
+    /// row when its spelling is distinct: never a capital that only starts a
+    /// sentence, and never a plain lowercase word.
+    func testOnlyDistinctSpellingsGetRows() {
+        XCTAssertEqual(verdict("Agent-Zorb", "Zorbentic", start: true).rules, [])
+        XCTAssertEqual(verdict("big zorket", "zorket").rules, [])
+        XCTAssertEqual(verdict("Zorb Skills", "zorb-skills").rules, [.replace, .casing])
     }
 }

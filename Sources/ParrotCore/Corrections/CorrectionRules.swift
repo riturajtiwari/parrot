@@ -55,6 +55,10 @@ struct LocalJudge: Sendable {
     /// A word corrected this often may enter the example sentence even when
     /// it has no row.
     static let promptEvidence = 5
+    /// A pair seen fewer times than this must sound at least
+    /// `minRareSimilarity` alike to be a mishearing at all.
+    static let rareEvidence = 3
+    static let minRareSimilarity = 0.4
 
     let common: CommonWords
 
@@ -82,23 +86,45 @@ struct LocalJudge: Sendable {
         if !change.heard.isEmpty, heard.lowercased().hasPrefix(word.lowercased()), word.count < heard.count, word.count <= 3 {
             return none(.fragment, "part of the heard word")
         }
-        let allFunction = { (words: [String]) in words.allSatisfy { FunctionWords.all.contains($0.lowercased()) } }
-        if allFunction(change.corrected) || (!change.heard.isEmpty && allFunction(change.heard)) {
+        let isFunction = { (w: String) in FunctionWords.all.contains(w.lowercased()) }
+        if change.corrected.allSatisfy(isFunction) || (!change.heard.isEmpty && change.heard.allSatisfy(isFunction)) {
             return none(.rewording, "function words")
+        }
+        if change.corrected.count > 1, change.corrected.contains(where: isFunction) {
+            return none(.rewording, "a phrase, not a name")
+        }
+        if Self.isNumber(word) || (!change.heard.isEmpty && Self.isNumber(heard)) {
+            return none(.content, "a number")
+        }
+        if word.contains("/") || word.contains("\\") || word.range(of: #"\.[A-Za-z]{1,5}$"#, options: .regularExpression) != nil {
+            return none(.noise, "a path or file name")
         }
         if change.isCaseOnly, change.atSentenceStart || !Self.hasShape(word) {
             return none(.rewording, change.atSentenceStart ? "case at a sentence start" : "case of an ordinary word")
         }
+        // A model mishears a word as something like it. A rare pair that
+        // sounds nothing alike is a change of content ("option" → "v4").
+        if !change.heard.isEmpty, !change.isCaseOnly, !evidence.manual, evidence.seen < Self.rareEvidence {
+            let similarity = Phonetic.similarity(heard, word)
+            if similarity < Self.minRareSimilarity {
+                verdict.similarity = similarity
+                return none(.content, String(format: "sounds different (%.2f)", similarity))
+            }
+        }
 
         let wordIsCommon = common.isCommon(word)
-        let shaped = Self.hasShape(word)
+        // A capital that only starts a sentence says nothing about the word.
+        let shaped = Self.hasShape(word, atSentenceStart: change.atSentenceStart)
         let alreadyKnown = known.contains(word.lowercased())
+        // Every row's word is also a case rule, applied to every dictation:
+        // only a distinct spelling of an uncommon word may have a row.
+        let rowSafe = shaped && !wordIsCommon
 
         // `case`: a distinct spelling that is not an everyday word.
-        if shaped, !wordIsCommon {
+        if rowSafe {
             verdict.rules.insert(.casing)
         } else if !shaped {
-            verdict.reasons.append("lowercase word")
+            verdict.reasons.append(change.atSentenceStart ? "capital only at a sentence start" : "lowercase word")
         } else {
             verdict.reasons.append("common word")
         }
@@ -109,7 +135,9 @@ struct LocalJudge: Sendable {
             verdict.similarity = Phonetic.similarity(heard, word)
             let heardIsCommon = common.isCommon(heard)
             let singleShort = change.heard.count == 1 && heard.count < Self.minReplacedLength
-            if change.heard.count == 1, heardIsCommon {
+            if !rowSafe {
+                // The reason is already there: the word can't have a row.
+            } else if change.heard.count == 1, heardIsCommon {
                 verdict.reasons.append("heard form is a common word")
             } else if singleShort {
                 verdict.reasons.append("heard form is too short")
@@ -138,20 +166,29 @@ struct LocalJudge: Sendable {
         return verdict
     }
 
-    /// A spelling a reader notices: a capital after the first letter, a
-    /// digit, a capitalized word, or inner punctuation such as "CA-15".
-    static func hasShape(_ word: String) -> Bool {
-        word.split(separator: " ").contains { part in
+    /// A spelling a reader notices: a capital after the first letter, all
+    /// capitals, a digit, inner punctuation such as "CA-15", or a capital
+    /// first letter that doesn't just start a sentence.
+    static func hasShape(_ word: String, atSentenceStart: Bool = false) -> Bool {
+        word.split(separator: " ").enumerated().contains { index, part in
             let letters = part.filter(\.isLetter)
             guard let first = letters.first else { return part.contains(where: \.isNumber) }
-            return first.isUppercase
-                || letters.dropFirst().contains(where: \.isUppercase)
+            let inner = part.dropFirst().dropLast()
+            return letters.dropFirst().contains(where: \.isUppercase)
                 || part.contains(where: \.isNumber)
+                || inner.contains { "-._".contains($0) }
+                || (first.isUppercase && !(atSentenceStart && index == 0))
         }
+    }
+
+    /// Digits with punctuation or an ordinal ending ("5.15", "15th", "2024").
+    static func isNumber(_ text: String) -> Bool {
+        text.range(of: #"^[\d.,:/\- ]+(st|nd|rd|th|s)?$"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func kind(_ change: WordChange, shaped: Bool, wordIsCommon: Bool, learns: Bool) -> CorrectionKind {
         let word = change.correctedText
+        if !learns { return change.isCaseOnly || wordIsCommon ? .rewording : .content }
         if change.isCaseOnly { return .casing }
         if change.heard.count > 1, change.corrected.count == 1,
            change.heard.joined().lowercased() == word.lowercased().filter({ $0.isLetter || $0.isNumber }) {
@@ -160,7 +197,6 @@ struct LocalJudge: Sendable {
         if word.split(separator: " ").contains(where: { Phonetic.isAcronym(String($0)) || $0.contains(where: \.isNumber) }) {
             return .acronym
         }
-        if !learns { return wordIsCommon ? .rewording : .content }
         return shaped ? .properNoun : .term
     }
 }

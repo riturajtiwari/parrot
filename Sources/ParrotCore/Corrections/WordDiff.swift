@@ -69,6 +69,13 @@ enum WordDiff {
         return result
     }
 
+    /// The share of `pasted`'s words that `edited` kept, in order.
+    static func keptShare(from pasted: String, to edited: String) -> Double {
+        let a = words(pasted).map(\.key)
+        guard !a.isEmpty else { return 1 }
+        return Double(longestCommonSubsequence(a, words(edited).map(\.key)).count) / Double(a.count)
+    }
+
     /// A word as it appears (`text`, edge punctuation removed) and as it is
     /// compared (`key`, lowercased).
     struct Word: Equatable {
@@ -89,7 +96,10 @@ enum WordDiff {
         var result: [Word] = []
         var sentenceEnded = true
         for raw in plain.split(whereSeparator: { $0.isWhitespace }) {
-            let trimmed = raw.trimmingCharacters(in: edgePunctuation)
+            // Invisible format characters (a stray U+FEFF, a zero-width
+            // space) are not part of any word.
+            let visible = String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0.properties.generalCategory != .format }))
+            let trimmed = visible.trimmingCharacters(in: edgePunctuation)
             defer { sentenceEnded = raw.last.map { ".!?".contains($0) } ?? false }
             guard !trimmed.isEmpty else { continue }
             result.append(Word(text: trimmed, key: trimmed.lowercased(), startsSentence: sentenceEnded))

@@ -109,8 +109,10 @@ public enum Daemon {
         let switcher = ModelSwitcher(model: model, transcriber: transcriber, menuBar: menuBar)
 
         // The dictionary (#33): converted once from dictionary.json, created
-        // on first run, reloaded when it changes.
+        // on first run, reloaded when it changes. The learned overlay loads
+        // after it, and its rows never override the user's (ADR-006).
         let dictionary = DictionaryStore()
+        let layered = LayeredDictionary(base: dictionary)
         switch DictionaryMigration.run() {
         case .converted(let examples):
             // The text file has no place for example sentences; they move to
@@ -131,7 +133,7 @@ public enum Daemon {
         // Read at each release, so a Language change applies at the next press (#43).
         let dictionaryContext = {
             var context = DictionaryContext(
-                store: dictionary,
+                store: layered,
                 language: DictionaryContext.language(of: switcher.model, setting: settings.current.language.code),
                 examples: settings.current.dictionary.examples
             ).context()
@@ -147,7 +149,7 @@ public enum Daemon {
         let controller = DictationController(
             capture: capture,
             transcriber: transcriber,
-            processors: [DictionaryProcessor(store: dictionary)],
+            processors: [DictionaryProcessor(store: layered)],
             observers: observers,
             dumpWav: options.dumpWav,
             delivery: TextDelivery(mode: options.injectMode),

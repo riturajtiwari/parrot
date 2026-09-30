@@ -14,8 +14,9 @@ import Foundation
 /// directory's permissions (`Paths.prepareDirectory` refuses symlinks, which is
 /// right for logs and wrong here).
 package final class DictionaryStore: @unchecked Sendable {
-    /// A dictionary with its compiled replacement pass.
-    struct Loaded {
+    /// A dictionary with its compiled replacement pass. `package` so that
+    /// `DictionarySource` can return it.
+    package struct Loaded {
         let dictionary: UserDictionary
         let replacer: DictionaryReplacer
 
@@ -43,7 +44,7 @@ package final class DictionaryStore: @unchecked Sendable {
 
     /// The dictionary to use for this dictation, reloaded first if the file
     /// changed.
-    func current() -> Loaded {
+    package func current() -> Loaded {
         lock.lock()
         defer { lock.unlock() }
         refresh()
