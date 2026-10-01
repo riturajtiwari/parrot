@@ -63,6 +63,8 @@ final class ConnectModel: ObservableObject {
     @Published var baseURL = ""
     @Published private(set) var clearedClipboard = false
     @Published private(set) var hasSavedKey: Bool
+    /// The user asked to replace the saved key.
+    @Published private(set) var wantsNewKey = false
     /// The models to choose from, the suggested one first.
     @Published private(set) var models: [String] = []
     @Published var chosenModel = ""
@@ -103,22 +105,42 @@ final class ConnectModel: ObservableObject {
         !models.isEmpty && (phase == .choosingModel || isBusy)
     }
 
-    /// When the window opens: a key copied just before counts, and a local
-    /// server is looked for at once. With `reuseKey` (Change… in Settings),
-    /// the saved key goes straight to the model choice.
-    func start(reuseKey: Bool = false) {
+    /// The steps that get a key show when none is saved, or when the user
+    /// wants to replace it.
+    var showsKeySteps: Bool {
+        !hasSavedKey || wantsNewKey
+    }
+
+    /// When the window opens: a saved key goes straight to the model choice,
+    /// a key copied just before counts, and a local server or the saved
+    /// Other server is asked for its models at once.
+    func start() {
         switch provider.connectMethod {
         case .keyPage, .openRouterSignIn:
-            if reuseKey, hasSavedKey {
+            if hasSavedKey {
                 useSavedKey()
-            } else if case .keyPage = provider.connectMethod {
+            } else {
                 pollClipboard()
             }
         case .localServer:
             findLocalServer()
         case .manual:
-            if reuseKey, !baseURL.isEmpty { connectCustom() }
+            // Filled in only when Other is the provider now.
+            if !baseURL.isEmpty { connectCustom() }
         }
+    }
+
+    /// Shows the steps for a new key in place of the saved one.
+    func useNewKey() {
+        task?.cancel()
+        signIn?.stop()
+        signIn = nil
+        wantsNewKey = true
+        models = []
+        modelError = nil
+        phase = .ready
+        seenChange = -1
+        pollClipboard()
     }
 
     func cancel() {
@@ -135,9 +157,10 @@ final class ConnectModel: ObservableObject {
         if !isBusy { phase = .waiting }
     }
 
-    /// Looks at the clipboard; the window calls it twice a second.
+    /// Looks at the clipboard; the window calls it twice a second. Only
+    /// while the steps for a new key show.
     func pollClipboard() {
-        guard case .keyPage = provider.connectMethod, !isBusy, !isConnected else { return }
+        guard case .keyPage = provider.connectMethod, showsKeySteps, !isBusy, !isConnected else { return }
         let pasteboard = NSPasteboard.general
         guard pasteboard.changeCount != seenChange else { return }
         seenChange = pasteboard.changeCount
@@ -153,6 +176,7 @@ final class ConnectModel: ObservableObject {
     func useSavedKey() {
         guard let key = try? credentials.key(for: provider), !key.isEmpty else {
             hasSavedKey = false
+            pollClipboard()
             return
         }
         connect(key: key, fromClipboard: false, save: false)
@@ -162,10 +186,11 @@ final class ConnectModel: ObservableObject {
         let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
         let provider = self.provider
-        phase = .working("Checking the key with \(provider.shortName)…")
+        phase = .working(save ? "Checking the key with \(provider.shortName)…" : "Loading \(provider.shortName)'s models with the saved key…")
         task = Task {
             do {
                 let ids = try await ProviderConnect.check(key, for: provider)
+                guard !Task.isCancelled else { return }
                 if save { try credentials.save(key, for: provider) }
                 if fromClipboard, NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines) == key {
                     NSPasteboard.general.clearContents()
@@ -173,7 +198,10 @@ final class ConnectModel: ObservableObject {
                 }
                 offer(ids)
             } catch {
+                guard !Task.isCancelled else { return }
                 phase = .failed(Self.message(error, provider: provider))
+                // A saved key that no longer works: show the steps for a new one.
+                if !save { wantsNewKey = true }
             }
         }
     }
@@ -196,12 +224,17 @@ final class ConnectModel: ObservableObject {
                 }
                 phase = .working("Getting the key from OpenRouter…")
                 let key = try await OpenRouterSignIn.key(code: code, verifier: verifier)
+                guard !Task.isCancelled else { return }
                 try credentials.save(key, for: .openrouter)
+                hasSavedKey = true
                 phase = .working("Loading OpenRouter's models…")
-                offer(try await ProviderConnect.check(key, for: .openrouter))
+                let ids = try await ProviderConnect.check(key, for: .openrouter)
+                guard !Task.isCancelled else { return }
+                offer(ids)
             } catch LoopbackCallback.Failure.cancelled {
                 phase = .ready
             } catch {
+                guard !Task.isCancelled else { return }
                 phase = .failed(Self.message(error, provider: .openrouter))
             }
         }
@@ -213,7 +246,9 @@ final class ConnectModel: ObservableObject {
         let provider = self.provider
         phase = .working("Looking for \(provider.shortName) on this Mac…")
         task = Task {
-            guard let ids = await ProviderConnect.localModels(provider) else {
+            let ids = await ProviderConnect.localModels(provider)
+            guard !Task.isCancelled else { return }
+            guard let ids else {
                 phase = .failed("\(provider.shortName) isn't running. Start it, then click Try Again.")
                 return
             }
@@ -238,6 +273,7 @@ final class ConnectModel: ObservableObject {
         task = Task {
             do {
                 let ids = try await ProviderConnect.check(key, for: .custom, baseURL: base)
+                guard !Task.isCancelled else { return }
                 if !typed.isEmpty {
                     try credentials.save(typed, for: .custom)
                 } else if !sameServer {
@@ -245,6 +281,7 @@ final class ConnectModel: ObservableObject {
                 }
                 offer(ids, baseURL: text)
             } catch {
+                guard !Task.isCancelled else { return }
                 phase = .failed(Self.message(error, provider: .custom))
             }
         }
@@ -290,6 +327,7 @@ final class ConnectModel: ObservableObject {
             } catch {
                 failure = error as? LLMError ?? .notConfigured("\(error)")
             }
+            guard !Task.isCancelled else { return }
             if let failure {
                 modelError = "\(model) didn't answer the way the judge needs (\(failure)). Choose another model."
                 phase = .choosingModel
@@ -330,14 +368,11 @@ final class ConnectModel: ObservableObject {
 
 struct ConnectSheet: View {
     @StateObject private var model: ConnectModel
-    /// Opened from Change…: reuse the saved key and go to the models.
-    let reuseKey: Bool
     let onClose: () -> Void
     private let clock = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
-    init(provider: LLMProvider, store: SettingsStore, reuseKey: Bool = false, onClose: @escaping () -> Void) {
+    init(provider: LLMProvider, store: SettingsStore, onClose: @escaping () -> Void) {
         _model = StateObject(wrappedValue: ConnectModel(provider: provider, store: store))
-        self.reuseKey = reuseKey
         self.onClose = onClose
     }
 
@@ -374,7 +409,7 @@ struct ConnectSheet: View {
         }
         .padding(24)
         .frame(width: 420)
-        .onAppear { model.start(reuseKey: reuseKey) }
+        .onAppear { model.start() }
         .onDisappear { model.cancel() }
         .onReceive(clock) { _ in model.pollClipboard() }
     }
@@ -387,9 +422,14 @@ struct ConnectSheet: View {
     // MARK: - Methods
 
     @ViewBuilder private var keyPage: some View {
-        if model.hasSavedKey, !model.isConnected {
-            savedKeyRow
+        if model.showsKeySteps {
+            keySteps
+        } else {
+            savedKeyRow("Use a Different Key")
         }
+    }
+
+    @ViewBuilder private var keySteps: some View {
         step(1, "Open the \(provider.keyPageName), sign in, and make a key.") {
             Button("Open \(provider.keyPageName)") { model.openKeyPage() }
                 .buttonStyle(PillButtonStyle(primary: !model.showsModels))
@@ -409,14 +449,15 @@ struct ConnectSheet: View {
     }
 
     @ViewBuilder private var openRouter: some View {
-        if model.hasSavedKey, !model.isConnected {
-            savedKeyRow
+        if model.showsKeySteps {
+            Text("Sign in to OpenRouter in your browser. OpenRouter then gives Parrot a key of its own. You can see it and delete it on openrouter.ai.")
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Sign In with OpenRouter") { model.startSignIn() }
+                .buttonStyle(.primaryPill)
+                .disabled(model.phase == .waiting || model.isBusy || model.isConnected)
+        } else {
+            savedKeyRow("Sign In Again")
         }
-        Text("Sign in to OpenRouter in your browser. OpenRouter then gives Parrot a key of its own. You can see it and delete it on openrouter.ai.")
-            .fixedSize(horizontal: false, vertical: true)
-        Button("Sign In with OpenRouter") { model.startSignIn() }
-            .buttonStyle(.primaryPill)
-            .disabled(model.phase == .waiting || model.isBusy || model.isConnected)
     }
 
     @ViewBuilder private func localServer(_ download: URL) -> some View {
@@ -473,13 +514,13 @@ struct ConnectSheet: View {
         }
     }
 
-    private var savedKeyRow: some View {
+    /// The saved key is in use; `replace` names the way to another one.
+    private func savedKeyRow(_ replace: String) -> some View {
         HStack {
-            Text("A key is saved in the Keychain.")
+            Text("Parrot uses the key saved in the Keychain.")
             Spacer()
-            Button("Use It") { model.useSavedKey() }
+            Button(replace) { model.useNewKey() }
                 .buttonStyle(.pill)
-                .disabled(model.isBusy)
         }
     }
 

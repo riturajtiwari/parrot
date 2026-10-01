@@ -8,10 +8,9 @@ struct CorrectionsSection: View {
     /// Opens Review Corrections.
     var openReview: () -> Void = {}
 
+    /// The provider whose Connect window is open. With a saved key, the
+    /// window goes straight to the models.
     @State private var connecting: LLMProvider?
-    /// The Connect window opened from Change…: it reuses the saved key and
-    /// goes straight to the models.
-    @State private var changingModel = false
     @State private var hasKey = false
     @State private var status: String?
     @State private var busy = false
@@ -52,7 +51,6 @@ struct CorrectionsSection: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                     ForEach(LLMProvider.connectable) { choice in
                         ProviderTile(provider: choice, selected: isConnected && choice == provider) {
-                            changingModel = false
                             connecting = choice
                         }
                     }
@@ -78,7 +76,7 @@ struct CorrectionsSection: View {
         .onAppear(perform: refresh)
         .onChange(of: provider) { refresh() }
         .sheet(item: $connecting, onDismiss: refresh) { choice in
-            ConnectSheet(provider: choice, store: store, reuseKey: changingModel) { connecting = nil }
+            ConnectSheet(provider: choice, store: store) { connecting = nil }
         }
     }
 
@@ -93,10 +91,7 @@ struct CorrectionsSection: View {
             PillRow("Model") {
                 HStack {
                     Text(settings.resolvedModel ?? "none").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Button("Change…") {
-                        changingModel = true
-                        connecting = provider
-                    }
+                    Button("Change…") { connecting = provider }
                     .buttonStyle(.pill)
                     .disabled(busy)
                 }
