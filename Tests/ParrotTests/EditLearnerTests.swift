@@ -62,7 +62,9 @@ final class EditLearnerTests: XCTestCase {
         try decided(20, accepted: 20)
         var learned: [String] = []
         let l = learner()
-        l.onLearned = { learned.append($0) }
+        l.onOutcomes = { outcomes in
+            for case .added(let pair) in outcomes { learned.append(pair.word) }
+        }
         // Seen once: queued. Seen twice with the local rules: added.
         await l.learn([change])
         XCTAssertEqual(learned, [])
@@ -81,6 +83,40 @@ final class EditLearnerTests: XCTestCase {
         XCTAssertEqual(pairs.pair(word: "Qwilbo", heard: "Kwilbo")?.status, .suspect)
         XCTAssertNil(pairs.pair(word: "Kwilbo", heard: "Qwilbo"), "the reverse is never learned")
         XCTAssertEqual(try actions.pending().first?.pair.status, .suspect)
+    }
+
+    func testEachEditReportsWhatItDid() async throws {
+        var outcomes: [EditLearner.Outcome] = []
+        let l = learner()
+        l.onOutcomes = { outcomes += $0 }
+        await l.learn([change, WordChange(heard: ["zorb"], corrected: ["zorp"])])
+        XCTAssertEqual(outcomes.count, 2)
+        guard case .proposed(let pair) = outcomes.first else { return XCTFail("\(outcomes)") }
+        XCTAssertEqual(pair.word, "Qwilbo")
+        XCTAssertEqual(outcomes.last, .notLearned(reason: "a lowercase word"))
+    }
+
+    func testARevertIsReported() async throws {
+        try actions.accept(change, rules: [.replace, .casing], source: .watched, target: .overlay)
+        var outcomes: [EditLearner.Outcome] = []
+        let l = learner()
+        l.onOutcomes = { outcomes += $0 }
+        await l.learn([WordChange(heard: ["Qwilbo"], corrected: ["Kwilbo"])])
+        guard case .reverted(let pair) = outcomes.first else { return XCTFail("\(outcomes)") }
+        XCTAssertEqual(pair.word, "Qwilbo")
+    }
+
+    func testAPairDecidedBeforeStaysQuiet() async throws {
+        try actions.store.update {
+            $0.record(LearnedPair(word: "Qwilbo", heard: "Kwilbo", rules: [.casing], status: .pending, sources: [.watched],
+                                  seen: 1, firstSeen: Date(), lastSeen: Date()))
+        }
+        try actions.reject(word: "Qwilbo", heard: "Kwilbo")
+        var outcomes: [EditLearner.Outcome] = []
+        let l = learner()
+        l.onOutcomes = { outcomes += $0 }
+        await l.learn([change])
+        XCTAssertTrue(outcomes.isEmpty)
     }
 
     func testOffLearnsNothing() async throws {

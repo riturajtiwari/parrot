@@ -153,11 +153,8 @@ public enum Daemon {
         // watched apps and hands the corrections it sees to the learner.
         let delivery = TextDelivery(mode: options.injectMode)
         let learner = EditLearner(settings: { settings.current.corrections })
-        learner.onLearned = { word in
-            corrections.refresh()
-            menuBar.setStatus("learned \(word)")
-        }
-        learner.onQueued = { corrections.refresh() }
+        // The learning notice says what the learner made of each edit.
+        learner.onOutcomes = { outcomes in corrections.present(outcomes) }
         let watcher = EditWatcher(settings: { settings.current.corrections }, learner: learner)
         delivery.onInjected = { watcher.watch($0) }
 
@@ -167,6 +164,7 @@ public enum Daemon {
         observers.append(menuBar)
         observers.append(LatencyLog())
         observers.append(watcher)
+        observers.append(corrections.notice)
         let controller = DictationController(
             capture: capture,
             transcriber: transcriber,

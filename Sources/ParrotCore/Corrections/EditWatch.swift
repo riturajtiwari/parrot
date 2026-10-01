@@ -22,7 +22,8 @@ struct FieldState: Equatable {
 /// 2. Follow: find the region again between the text before and after it,
 ///    so text typed elsewhere in the field doesn't matter.
 /// 3. End on the next dictation, a focus change, an emptied field (a sent
-///    message), a lost anchor, a rewrite, idleness or the time limit. The
+///    message), a lost anchor or an unreadable field (after `maxMisses`
+///    reads in a row), a rewrite, idleness or the time limit. The
 ///    result compares the baseline with the last region that stayed the same
 ///    for two reads, never with a half-typed one.
 struct EditWatch {
@@ -31,6 +32,7 @@ struct EditWatch {
         case focusChanged = "focus changed"
         case emptied = "field emptied"
         case anchorLost = "anchor lost"
+        case unreadable = "field unreadable"
         case rewritten = "rewritten"
         case idle = "idle"
         case timeUp = "time up"
@@ -52,6 +54,10 @@ struct EditWatch {
         /// Characters of anchor on each side of the region.
         var anchor = 32
         var maxChanges = 4
+        /// Reads in a row that may fail or lose the region before the watch
+        /// ends: a busy app misses a read now and then, and an anchor can
+        /// vanish for a moment while the user types over it.
+        var maxMisses = 5
     }
 
     let pasted: String
@@ -69,6 +75,11 @@ struct EditWatch {
     private var stable: String?
     private var unchanged = 0
     private var lastChange: TimeInterval
+    private var misses = 0
+    private var locateFailure: String?
+    /// What the last failed read missed, for the log: `read`, `before`,
+    /// `after` or `window`. Never text.
+    private(set) var lastMiss: String?
 
     init(pasted: String, expected: Int, at now: TimeInterval, limits: Limits = Limits()) {
         self.pasted = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,14 +91,15 @@ struct EditWatch {
 
     mutating func step(_ field: FieldState?, at now: TimeInterval) -> Step {
         guard let baseline else { return confirm(field, at: now) }
-        guard let field else { return finish(.anchorLost) }
+        guard let field else { return miss("read", .unreadable, at: now) }
         if !field.focused { return finish(.focusChanged) }
         let text = field.text as NSString
         if field.offset == 0, field.reachesEnd,
            field.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || field.text == field.placeholder {
             return finish(.emptied)
         }
-        guard let region = locate(in: field) else { return finish(.anchorLost) }
+        guard let region = locate(in: field) else { return miss(locateFailure ?? "anchor", .anchorLost, at: now) }
+        misses = 0
         _ = text
         if WordDiff.keptShare(from: baseline, to: region) < 0.5 {
             return .ended(.rewritten, [])
@@ -118,6 +130,16 @@ struct EditWatch {
         return .ended(reason, Array(changes.prefix(limits.maxChanges)))
     }
 
+    /// A read that failed or lost the region. The watch ends only after
+    /// `maxMisses` of them in a row, or at the time limit.
+    private mutating func miss(_ what: String, _ reason: End, at now: TimeInterval) -> Step {
+        lastMiss = what
+        misses += 1
+        if misses >= limits.maxMisses { return finish(reason) }
+        if now - started >= limits.total { return finish(.timeUp) }
+        return .following
+    }
+
     // MARK: - Steps
 
     private mutating func confirm(_ field: FieldState?, at now: TimeInterval) -> Step {
@@ -143,12 +165,16 @@ struct EditWatch {
 
     /// The region between the anchors, or nil when an anchor is gone.
     private mutating func locate(in field: FieldState) -> String? {
+        locateFailure = nil
         let text = field.text as NSString
         let end = field.offset + text.length
         var start = field.offset
         if !before.isEmpty {
             let expectedAnchor = regionStart - (before as NSString).length
-            guard let at = Self.nearest(before, in: text, offset: field.offset, around: expectedAnchor) else { return nil }
+            guard let at = Self.nearest(before, in: text, offset: field.offset, around: expectedAnchor) else {
+                locateFailure = "before"
+                return nil
+            }
             start = at + (before as NSString).length
         } else if regionStart > field.offset {
             start = regionStart
@@ -156,9 +182,13 @@ struct EditWatch {
         var stop = end
         if !after.isEmpty {
             let guess = start + ((last ?? pasted) as NSString).length
-            guard let at = Self.nearest(after, in: text, offset: field.offset, around: guess), at >= start else { return nil }
+            guard let at = Self.nearest(after, in: text, offset: field.offset, around: guess), at >= start else {
+                locateFailure = "after"
+                return nil
+            }
             stop = at
         } else if !field.reachesEnd {
+            locateFailure = "window"
             return nil
         }
         regionStart = start

@@ -120,9 +120,28 @@ final class MenuBarController {
         statusLine.title = text
     }
 
-    /// Shows how many corrections wait for review.
+    /// Shows how many corrections wait for review, in the menu and as a dot
+    /// on the bird.
     func setReviewCount(_ count: Int) {
         reviewItem.title = count > 0 ? "Review Corrections (\(count))…" : "Review Corrections…"
+        guard (count > 0) != showsBadge, let button = statusItem.button else { return }
+        showsBadge = count > 0
+        let image = showsBadge ? Self.birdImage().map(Self.withDot) : Self.birdImage()
+        image?.isTemplate = true
+        button.image = image
+    }
+
+    private var showsBadge = false
+
+    /// `image` with a small dot at its top right, in the same template color.
+    private static func withDot(_ image: NSImage) -> NSImage {
+        NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            let diameter: CGFloat = 5
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: rect.maxX - diameter, y: rect.maxY - diameter, width: diameter, height: diameter)).fill()
+            return true
+        }
     }
 
     /// Offers Undo for the word Parrot added last, or hides it.

@@ -30,6 +30,7 @@ Last updated: `2026.09.30`
   - OpenRouter has a sign-in, OAuth with PKCE, that returns a key. The redirect goes to a one-shot listener on the loopback interface, which takes one request and stops after at most 5 minutes.
   - Ollama and LM Studio run on the Mac. Parrot asks them for their models.
 - **Wispr Flow import in Settings.** The Import button runs the same import as `parrot import wispr`. The judge checks the pairs when one is connected. The proposals wait in Review Corrections, and Review Corrections shows the rules recorded with each pair, narrowed by the local vetoes.
+- **Learning notice.** After an edit, a notice above the recording pill shows the word pair with Add and Not this, or Added with Undo, or a short reason when Parrot learns nothing. It takes no focus, it shows only the pair that `corrections.json` already holds, and the log gives the reason without the words.
 - **No keystrokes.** The watcher uses Accessibility reads only. The event tap stays `flagsChanged` only (ADR-003).
 - **Wispr Flow import.** Parrot opens Wispr's database read-only: as an ordinary reader while Wispr Flow runs, and as an immutable file when it is quit. All reads run in one transaction. It never writes to Wispr's files, and it never writes a copy to disk.
 - **Common words.** The English word embedding that ships with macOS decides what is a common word. It needs no download and no bundled list.

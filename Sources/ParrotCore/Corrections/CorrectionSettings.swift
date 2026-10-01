@@ -83,6 +83,9 @@ struct CorrectionSettings: Codable, Equatable, Sendable {
     /// whose text fields `parrot-bench ax-probe` shows as readable. Never
     /// terminals, code editors or password managers.
     var watchedApps = CorrectionSettings.defaultWatchedApps
+    /// The learning notice above the recording pill says what Parrot made
+    /// of each edit.
+    var showNotices = true
 
     static let defaultWatchedApps = [
         "com.apple.TextEdit", "com.apple.Notes", "com.apple.mail", "com.apple.MobileSMS",
@@ -101,6 +104,7 @@ struct CorrectionSettings: Codable, Equatable, Sendable {
         maxPerDictation = try c.decodeIfPresent(Int.self, forKey: .maxPerDictation) ?? 4
         watchSeconds = try c.decodeIfPresent(Int.self, forKey: .watchSeconds) ?? 60
         watchedApps = try c.decodeIfPresent([String].self, forKey: .watchedApps) ?? Self.defaultWatchedApps
+        showNotices = try c.decodeIfPresent(Bool.self, forKey: .showNotices) ?? true
     }
 
     /// The model to ask, or nil when there is none to ask.

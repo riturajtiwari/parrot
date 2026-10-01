@@ -42,8 +42,10 @@ final class EditWatcher: DictationObserver {
             limits: limits
         )
         let learner = self.learner
-        let session = WatchSession(element: injected.element.ref, watch: watch, queue: queue) { changes, reason in
-            Log.info("edit watch: \(reason.rawValue) · \(changes.count) change(s)")
+        let session = WatchSession(element: injected.element.ref, watch: watch, queue: queue) { changes, reason, miss in
+            // The reason and what the last read missed; never text.
+            let detail = (reason == .anchorLost || reason == .unreadable) ? miss.map { " (\($0))" } ?? "" : ""
+            Log.info("edit watch: \(reason.rawValue)\(detail) · \(changes.count) change(s)")
             guard !changes.isEmpty else { return }
             Task { @MainActor in await learner.learn(changes) }
         }
@@ -69,14 +71,14 @@ final class WatchSession: @unchecked Sendable {
     private let element: AXUIElement
     private var watch: EditWatch
     private let queue: DispatchQueue
-    private let onEnd: ([WordChange], EditWatch.End) -> Void
+    private let onEnd: ([WordChange], EditWatch.End, String?) -> Void
     private var timer: DispatchSourceTimer?
     private var ended = false
 
     /// Fields longer than this are read as a window around the paste.
     static let wholeFieldLimit = 20_000
 
-    init(element: AXUIElement, watch: EditWatch, queue: DispatchQueue, onEnd: @escaping ([WordChange], EditWatch.End) -> Void) {
+    init(element: AXUIElement, watch: EditWatch, queue: DispatchQueue, onEnd: @escaping ([WordChange], EditWatch.End, String?) -> Void) {
         self.element = element
         self.watch = watch
         self.queue = queue
@@ -111,7 +113,7 @@ final class WatchSession: @unchecked Sendable {
         ended = true
         timer?.cancel()
         timer = nil
-        onEnd(changes, reason)
+        onEnd(changes, reason, watch.lastMiss)
     }
 
     /// The field as it is now, or nil when the app doesn't say.

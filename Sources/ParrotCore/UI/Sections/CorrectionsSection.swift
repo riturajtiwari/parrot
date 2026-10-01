@@ -45,6 +45,17 @@ struct CorrectionsSection: View {
             if settings.learning == .hybrid {
                 caption(HybridGate.status((try? LearnedStore().load().pairs) ?? []).summary)
             }
+            if settings.learning != .off {
+                PillRow("Notices") {
+                    Toggle("Show what Parrot learns", isOn: Binding(
+                        get: { settings.showNotices },
+                        set: { on in store.update { $0.corrections.showNotices = on } }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
+                caption("A notice above the dictation pill says what Parrot made of each edit, with Add, Not this or Undo.")
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Judge")
@@ -209,8 +220,8 @@ struct CorrectionsSection: View {
     private static func explanation(_ mode: CorrectionSettings.Learning) -> String {
         switch mode {
         case .off: return "Parrot learns nothing from your corrections."
-        case .review: return "Parrot collects corrections. Nothing changes until you accept one in Review Corrections."
-        case .hybrid: return "Parrot adds clear fixes of rare words at once, with Undo, and queues the rest. It starts when its precision on your reviews reaches 95%."
+        case .review: return "Parrot asks before it learns: Add or Not this. Nothing changes until you add a word."
+        case .hybrid: return "Parrot asks first. When its proposals match 95% of your choices over 20 of them, it adds clear fixes of rare words at once, with Undo."
         }
     }
 }

@@ -65,11 +65,19 @@ Undo removes a row only when Parrot created it. On your own row, it removes only
 
 ## 5. Learning from your edits
 
-After each paste into a watched app, Parrot reads the text field over Accessibility for up to 60 s. When you change a word, it proposes the pair. **Settings → Corrections → Learning** has three modes:
+After each paste into a watched app, Parrot reads the text field over Accessibility for up to 60 s. When you change a word, a notice above the dictation pill says what Parrot made of it:
+
+- **Learn heard → word? · Add · Not this:** Parrot asks before it learns. Add writes the row into your dictionary. Not this means Parrot never proposes the pair again. If you ignore the notice, the pair waits in Review Corrections.
+- **Added “word” to your dictionary · Undo:** Parrot added a clear fix at once (Hybrid, after its gate opens). Undo removes it.
+- **Edit seen: nothing to learn (reason):** Parrot saw the change, but it is a rewording, an everyday word, or something else that is unsafe to learn.
+
+A notice takes no focus from your app, and a new dictation hides it. A dot on the menu bar bird shows that pairs wait in Review Corrections. **Settings → Corrections → Notices** turns the notices off.
+
+**Settings → Corrections → Learning** has three modes:
 
 - **Off:** Parrot learns nothing.
-- **Review:** Parrot collects pairs. Nothing changes until you accept one.
-- **Hybrid:** Parrot adds clear fixes of rare words at once, with Undo, and queues the rest. It starts only when its proposals were right in 95% of at least 20 of your reviews. Automatic adds go to `~/Library/Application Support/parrot/learned-dictionary`, never into your own dictionary.
+- **Review:** Parrot always asks. Nothing changes until you add a word.
+- **Hybrid:** Parrot asks first. When its proposals match 95% of your choices over at least 20 of them, it adds clear fixes of rare words at once, with Undo. Automatic adds go to `~/Library/Application Support/parrot/learned-dictionary`, never into your own dictionary.
 
 The watched apps are in `settings.json` under `corrections.watchedApps`. To see which apps expose their text fields, run `parrot-bench ax-probe`. Parrot never watches a password field, and it reads no keystrokes.
 

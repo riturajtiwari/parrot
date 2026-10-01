@@ -1,13 +1,16 @@
 import AppKit
 
-/// Fix Word, the review window and Undo (ADR-006), wired to the menu bar
-/// and to the "Fix Word in Parrot" service.
+/// Fix Word, the review window, Undo and the learning notice (ADR-006),
+/// wired to the menu bar and to the "Fix Word in Parrot" service.
 @MainActor
 final class CorrectionsUI {
     private let menuBar: MenuBarController
     private let actions = CorrectionActions()
     private let fixWord = FixWordPanel()
     private let review: ReviewWindow
+    private let settings: SettingsStore?
+    /// Above the recording pill; a dictation observer, so a dictation hides it.
+    let notice = LearningNotice()
     /// The service provider; `NSApp.servicesProvider` holds it weakly, so
     /// this keeps it alive.
     let service = FixWordService()
@@ -15,6 +18,7 @@ final class CorrectionsUI {
     /// `settings` lets Review Corrections edit the example sentence.
     init(menuBar: MenuBarController, settings: SettingsStore? = nil) {
         self.menuBar = menuBar
+        self.settings = settings
         review = ReviewWindow(settings: settings)
         fixWord.onAdd = { [weak self] change, rules in self?.add(change, rules) }
         review.onChange = { [weak self] in self?.refresh() }
@@ -54,6 +58,70 @@ final class CorrectionsUI {
         } catch {
             return "Not added: \(error)"
         }
+    }
+
+    // MARK: - The learning notice
+
+    /// Says what the learner made of an edit, unless the user turned the
+    /// notices off: Add or Not this for a question, Undo for an add.
+    func present(_ outcomes: [EditLearner.Outcome]) {
+        refresh()
+        guard settings?.current.corrections.showNotices ?? true, let plan = LearningNoticePlan.plan(outcomes) else { return }
+        switch plan.kind {
+        case .added:
+            guard let pair = plan.pair else { return }
+            notice.show(.init(symbol: "book.closed", text: plan.text, actions: [
+                .init(title: "Undo") { [weak self] in self?.undo(pair) },
+            ], duration: plan.duration))
+        case .ask:
+            guard let pair = plan.pair else { return }
+            notice.show(.init(symbol: "sparkles", text: plan.text, actions: [
+                .init(title: "Add", primary: true) { [weak self] in self?.accept(pair) },
+                .init(title: "Not this") { [weak self] in self?.reject(pair) },
+            ], duration: plan.duration))
+        case .reverted:
+            notice.show(.init(symbol: "arrow.uturn.backward", text: plan.text, actions: [
+                .init(title: "Review") { [weak self] in self?.showReview() },
+            ], duration: plan.duration))
+        case .notLearned:
+            notice.show(.init(symbol: "eye", text: plan.text, duration: plan.duration, faint: true))
+        }
+    }
+
+    /// Add on a question: the proposed rules, into the user's dictionary,
+    /// like Accept in Review Corrections.
+    private func accept(_ pair: LearnedPair) {
+        let change = WordChange(heard: pair.heard.map { WordDiff.words($0).map(\.text) } ?? [],
+                                corrected: WordDiff.words(pair.word).map(\.text))
+        do {
+            try actions.accept(change, rules: Set(pair.rules), source: pair.sources.first ?? .watched, seen: pair.seen)
+            notice.show(.init(symbol: "checkmark", text: "Added “\(pair.word)”", duration: 1.5))
+        } catch {
+            notice.show(.init(symbol: "exclamationmark.triangle", text: "Not added: \(error)", duration: 3))
+        }
+        refresh()
+    }
+
+    /// Not this on a question: never proposed again.
+    private func reject(_ pair: LearnedPair) {
+        do {
+            try actions.reject(word: pair.word, heard: pair.heard)
+            notice.show(.init(symbol: "xmark", text: "Parrot won't suggest “\(pair.word)” again", duration: 1.5))
+        } catch {
+            Log.warning("reject failed: \(error)")
+        }
+        refresh()
+    }
+
+    /// Undo on an add: removes what it wrote.
+    private func undo(_ pair: LearnedPair) {
+        do {
+            try actions.undo(pair)
+            notice.show(.init(symbol: "arrow.uturn.backward", text: "Undone", duration: 1.5))
+        } catch {
+            notice.show(.init(symbol: "exclamationmark.triangle", text: "Couldn't undo: \(error)", duration: 3))
+        }
+        refresh()
     }
 
     private func undoLast() {

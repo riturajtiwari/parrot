@@ -50,10 +50,31 @@ final class EditWatchTests: XCTestCase {
         XCTAssertEqual(w.finish(.focusChanged), .ended(.focusChanged, [WordChange(heard: ["kwilbo"], corrected: ["Qwilbo"])]))
     }
 
-    func testAnEditedAnchorEndsTheWatch() {
+    func testAnEditedAnchorEndsTheWatchAfterSeveralReads() {
         var w = watch()
         _ = w.step(field(prefix + pasted), at: 0.3)
-        XCTAssertEqual(w.step(field("Hey all," + " ping the Qwilbo team today "), at: 1), .ended(.anchorLost, []))
+        let edited = field("Hey all," + " ping the Qwilbo team today ")
+        for read in 1..<5 { XCTAssertEqual(w.step(edited, at: Double(read)), .following) }
+        XCTAssertEqual(w.step(edited, at: 5), .ended(.anchorLost, []))
+        XCTAssertEqual(w.lastMiss, "before")
+    }
+
+    func testAMissedReadDoesNotEndTheWatch() {
+        var w = watch()
+        _ = w.step(field(prefix + pasted), at: 0.3)
+        // A busy app misses a read now and then.
+        XCTAssertEqual(w.step(nil, at: 0.7), .following)
+        XCTAssertEqual(w.step(field(prefix + " ping the Qwilbo team today "), at: 1), .following)
+        XCTAssertEqual(w.step(field(prefix + " ping the Qwilbo team today "), at: 1.5), .following)
+        XCTAssertEqual(w.finish(.nextDictation), .ended(.nextDictation, [WordChange(heard: ["kwilbo"], corrected: ["Qwilbo"])]))
+    }
+
+    func testAFieldThatStaysUnreadableEndsTheWatch() {
+        var w = watch()
+        _ = w.step(field(prefix + pasted), at: 0.3)
+        for read in 1..<5 { XCTAssertEqual(w.step(nil, at: 0.3 + Double(read) * 0.4), .following) }
+        XCTAssertEqual(w.step(nil, at: 2.5), .ended(.unreadable, []))
+        XCTAssertEqual(w.lastMiss, "read")
     }
 
     func testARewriteLearnsNothing() {
