@@ -56,10 +56,18 @@ if [ -z "${PARROT_NO_RESTART:-}" ] && pgrep -f "^$EXE" >/dev/null 2>&1; then
     WAS_RUNNING=1
     echo "→ quitting the running Parrot"
     pkill -TERM -f "^$EXE" || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
+    # A copy in the middle of a dictation can take a while to stop. Replacing
+    # the bundle under it makes `open` below activate the dying copy, which
+    # fails, so wait for it, and then stop it hard.
+    for _ in $(seq 1 20); do
         pgrep -f "^$EXE" >/dev/null 2>&1 || break
         sleep 0.5
     done
+    if pgrep -f "^$EXE" >/dev/null 2>&1; then
+        echo "  still running after 10 s; stopping it"
+        pkill -KILL -f "^$EXE" || true
+        sleep 1
+    fi
 fi
 
 echo "→ installing to $DEST"
@@ -90,7 +98,13 @@ fi
 
 if [ "$WAS_RUNNING" = 1 ]; then
     echo "→ reopening Parrot"
-    open "$DEST"
+    # LaunchServices can refuse the first try while it forgets the old copy.
+    REOPENED=0
+    for _ in 1 2 3 4 5; do
+        if open "$DEST" 2>/dev/null; then REOPENED=1; break; fi
+        sleep 1
+    done
+    [ "$REOPENED" = 1 ] || echo "! couldn't reopen Parrot. Open it from Applications."
 fi
 
 if [ -f "$HOME/Library/LaunchAgents/com.digimata.parrot.plist" ]; then
