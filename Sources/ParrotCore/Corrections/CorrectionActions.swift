@@ -61,17 +61,26 @@ struct CorrectionActions {
         try reject(word: pair.word, heard: pair.heard)
     }
 
-    /// The pending pairs, most seen first, each judged again, and the added
-    /// pairs the user reverted since (suspect), first.
+    /// Whether a pair waits for the user: a pending pair that proposes
+    /// rules, or a suspect one. A pending pair with no rules waits for a
+    /// judge instead. The Whisper replay saves its pairs that way, so that
+    /// the Wispr import judges them with the user's kept text first.
+    static func waitsForReview(_ pair: LearnedPair) -> Bool {
+        pair.status == .suspect || (pair.status == .pending && !pair.rules.isEmpty)
+    }
+
+    /// The pairs that wait for review, most seen first, with the added pairs
+    /// the user reverted since (suspect) first.
     ///
-    /// A pending pair shows the rules recorded with it, when it has any:
-    /// they came from evidence that is not all stored, such as context, and
-    /// from the LLM judge. The local rules still apply, so a rule that they
-    /// block now drops out; only `prompt` may come from the judge alone.
+    /// A pending pair shows the rules recorded with it: they came from
+    /// evidence that is not all stored, such as context, and from the LLM
+    /// judge. The local rules judge it again with the stored evidence and
+    /// still apply, so a rule that they block now drops out; only `prompt`
+    /// may come from the LLM judge alone.
     func pending(judge: LocalJudge = LocalJudge()) throws -> [Review] {
         let known = Set(Self.words(in: dictionary).map { $0.lowercased() })
         return try store.load().pairs
-            .filter { $0.status == .pending || $0.status == .suspect }
+            .filter(Self.waitsForReview)
             .sorted { ($0.status == .suspect ? 1 : 0, $0.seen) > ($1.status == .suspect ? 1 : 0, $1.seen) }
             .map { pair in
                 let change = WordChange(heard: pair.heard.map { WordDiff.words($0).map(\.text) } ?? [],
@@ -80,7 +89,7 @@ struct CorrectionActions {
                 if pair.status == .suspect {
                     verdict.rules = Set(pair.rules)
                     verdict.reasons.insert("you reverted what this rule wrote; Reject removes it", at: 0)
-                } else if !pair.rules.isEmpty {
+                } else {
                     verdict.rules = Set(pair.rules).intersection(LLMJudge.allowed(verdict))
                 }
                 return Review(pair: pair, change: change, verdict: verdict)
@@ -89,7 +98,7 @@ struct CorrectionActions {
 
     /// How many pairs wait for review, without judging them.
     func pendingCount() throws -> Int {
-        try store.load().pairs.filter { $0.status == .pending || $0.status == .suspect }.count
+        try store.load().pairs.filter(Self.waitsForReview).count
     }
 
     /// Added pairs, newest first.

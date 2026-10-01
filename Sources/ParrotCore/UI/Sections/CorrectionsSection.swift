@@ -9,8 +9,10 @@ struct CorrectionsSection: View {
     var openReview: () -> Void = {}
 
     @State private var connecting: LLMProvider?
+    /// The Connect window opened from Change…: it reuses the saved key and
+    /// goes straight to the models.
+    @State private var changingModel = false
     @State private var hasKey = false
-    @State private var models: [String] = []
     @State private var status: String?
     @State private var busy = false
     @State private var importing = false
@@ -50,6 +52,7 @@ struct CorrectionsSection: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                     ForEach(LLMProvider.connectable) { choice in
                         ProviderTile(provider: choice, selected: isConnected && choice == provider) {
+                            changingModel = false
                             connecting = choice
                         }
                     }
@@ -75,7 +78,7 @@ struct CorrectionsSection: View {
         .onAppear(perform: refresh)
         .onChange(of: provider) { refresh() }
         .sheet(item: $connecting, onDismiss: refresh) { choice in
-            ConnectSheet(provider: choice, store: store) { connecting = nil }
+            ConnectSheet(provider: choice, store: store, reuseKey: changingModel) { connecting = nil }
         }
     }
 
@@ -87,24 +90,16 @@ struct CorrectionsSection: View {
         } else if !isConnected {
             caption("\(provider.shortName) has no key. Click its tile to connect it.")
         } else {
-            HStack {
-                Text("Model")
-                Spacer()
-                if models.isEmpty {
-                    TextField(provider.defaultModel ?? "model id", text: Binding(
-                        get: { settings.model ?? "" },
-                        set: { value in store.update { $0.corrections.model = value.isEmpty ? nil : value } }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 200)
-                } else {
-                    PillMenu(title: settings.resolvedModel ?? "Choose a model") {
-                        ForEach(models, id: \.self) { id in
-                            Button(id) { store.update { $0.corrections.model = id } }
-                        }
+            PillRow("Model") {
+                HStack {
+                    Text(settings.resolvedModel ?? "none").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Button("Change…") {
+                        changingModel = true
+                        connecting = provider
                     }
+                    .buttonStyle(.pill)
+                    .disabled(busy)
                 }
-                Button("Load Models", action: loadModels).buttonStyle(.pill).disabled(busy)
             }
             PillRow("Check") {
                 HStack {
@@ -136,34 +131,12 @@ struct CorrectionsSection: View {
             $0.corrections.model = nil
             $0.corrections.baseURL = nil
         }
-        models = []
         if let page = old.keysPage {
             status = "Disconnected, and the key is out of the Keychain. It still works at \(old.shortName) until you delete it at \(page.host ?? page.absoluteString)."
         } else {
             status = "Disconnected."
         }
         refresh()
-    }
-
-    private func loadModels() {
-        let settings = self.settings
-        busy = true
-        status = "Loading models…"
-        Task {
-            do {
-                let ids = try await LLMClients.make(settings).models()
-                await MainActor.run {
-                    models = ids
-                    status = ids.isEmpty ? "The provider lists no models." : nil
-                    busy = false
-                }
-            } catch {
-                await MainActor.run {
-                    status = "Couldn't load models: \(error)"
-                    busy = false
-                }
-            }
-        }
     }
 
     /// Two made-up pairs, the same as `parrot llm test`.
@@ -175,13 +148,8 @@ struct CorrectionsSection: View {
             let started = Date()
             let message: String
             do {
-                let judge = LLMJudge(client: try LLMClients.make(settings), local: LocalJudge(), timeout: 30)
-                let items = [
-                    WordChange(heard: ["Kwilbo"], corrected: ["Qwilbo"]),
-                    WordChange(heard: ["weekend"], corrected: ["week"]),
-                ].map { LLMJudge.Item(change: $0, evidence: CorrectionEvidence(seen: 3)) }
-                let outcome = await judge.judge(items)
-                if let failure = outcome.failures.first {
+                let client = try LLMClients.make(settings)
+                if let failure = await ProviderConnect.test(client) {
                     message = "Failed: \(failure)"
                 } else {
                     message = String(format: "Works: answered in %.1f s.", Date().timeIntervalSince(started))

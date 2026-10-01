@@ -35,9 +35,9 @@ final class WisprImportRunTests: XCTestCase {
         dir = nil
     }
 
-    /// One learned word, Qwilbo for "Kwilbo", used 5 times, and dictations
-    /// that keep "kwilbo" as it is `kept` times.
-    private func makeDatabase(kept: Int = 0) throws {
+    /// One learned word, Qwilbo for "Kwilbo", used 5 times, unless `qwilbo`
+    /// is false, and `kept` dictations of `keptText` that the user kept.
+    private func makeDatabase(kept: Int = 0, keptText: String = "the kwilbo stays", qwilbo: Bool = true) throws {
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(run.database.path, &db), SQLITE_OK)
         defer { sqlite3_close(db) }
@@ -45,11 +45,13 @@ final class WisprImportRunTests: XCTestCase {
             CREATE TABLE Dictionary (id TEXT, phrase TEXT, replacement TEXT, teamDictionaryId TEXT DEFAULT '00000000-0000-0000-0000-000000000000',
               frequencyUsed INTEGER DEFAULT 0, manualEntry INTEGER DEFAULT 0, isDeleted INTEGER DEFAULT 0, source TEXT,
               isSnippet INTEGER DEFAULT 0, observedSource TEXT);
-            INSERT INTO Dictionary (id, phrase, observedSource, frequencyUsed, source) VALUES ('1', 'Qwilbo', 'Kwilbo', 5, 'user_edits');
             CREATE TABLE History (transcriptEntityId TEXT, formattedText TEXT, pastedText TEXT, editedText TEXT, audio BLOB, timestamp DATETIME);
             """
+        if qwilbo {
+            sql += "INSERT INTO Dictionary (id, phrase, observedSource, frequencyUsed, source) VALUES ('1', 'Qwilbo', 'Kwilbo', 5, 'user_edits');\n"
+        }
         for index in 0..<kept {
-            sql += "INSERT INTO History VALUES ('k\(index)', 'the kwilbo stays', 'the kwilbo stays', NULL, NULL, '2026-01-01');\n"
+            sql += "INSERT INTO History VALUES ('k\(index)', '\(keptText)', '\(keptText)', NULL, NULL, '2026-01-01');\n"
         }
         XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, String(cString: sqlite3_errmsg(db)))
     }
@@ -70,6 +72,30 @@ final class WisprImportRunTests: XCTestCase {
         // "Kwilbo" is a word the user keeps, so it is never replaced.
         XCTAssertFalse(pair.rules.contains(.replace))
         XCTAssertFalse(try XCTUnwrap(try run.actions.pending(judge: local).first).verdict.rules.contains(.replace))
+    }
+
+    func testTheImportJudgesTheReplaysPairsWithKeptText() async throws {
+        try makeDatabase(kept: 3, keptText: "we passed the qx 7 audit", qwilbo: false)
+        try run.actions.store.update { pairs in
+            for (word, heard) in [("QX7", "qx 7"), ("zorp", "zorb")] {
+                pairs.record(LearnedPair(word: word, heard: heard, rules: [], status: .pending, sources: [.whisper],
+                                         seen: 4, firstSeen: Date(), lastSeen: Date()))
+            }
+        }
+        XCTAssertEqual(try run.actions.pendingCount(), 0, "the replay's pairs wait for the import")
+
+        _ = try await run.run(settings: CorrectionSettings(), known: [])
+        let stored = try run.actions.store.load()
+        // The user keeps "qx 7" three times, so it is never replaced.
+        let soc = try XCTUnwrap(stored.pair(word: "QX7", heard: "qx 7"))
+        XCTAssertEqual(soc.keptHeard, 3)
+        XCTAssertFalse(soc.rules.isEmpty)
+        XCTAssertFalse(soc.rules.contains(.replace))
+        // A lowercase word teaches nothing: it gets the evidence and stays out of Review.
+        let zorp = try XCTUnwrap(stored.pair(word: "zorp", heard: "zorb"))
+        XCTAssertEqual(zorp.keptHeard, 0)
+        XCTAssertEqual(zorp.rules, [])
+        XCTAssertEqual(try run.actions.pending(judge: local).map(\.pair.word), ["QX7"])
     }
 
     func testASecondImportKeepsTheUsersDecision() async throws {

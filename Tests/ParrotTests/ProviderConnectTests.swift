@@ -144,10 +144,31 @@ final class ProviderConnectTests: XCTestCase {
 
     // MARK: - The model to start with
 
-    func testClaudeKeepsItsDefaultModel() {
-        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: ["claude-haiku-4-5", "claude-opus-5-5"]), "claude-opus-5-5")
-        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: []), "claude-opus-5-5")
-        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: ["claude-opus-4-1-20250805", "claude-opus-5", "claude-sonnet-5-5"]), "claude-opus-5")
+    func testClaudeStartsWithItsSmallestModel() {
+        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: ["claude-haiku-4-5", "claude-opus-5-5"]), "claude-haiku-4-5")
+        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: ["claude-haiku-4-5-20251001", "claude-opus-5-5"]), "claude-haiku-4-5-20251001")
+        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: []), "claude-haiku-4-5")
+        XCTAssertEqual(ProviderConnect.suggestModel(for: .claude, from: ["claude-opus-5", "claude-sonnet-4-6", "claude-sonnet-5-5"]), "claude-sonnet-5-5")
+    }
+
+    func testTheModelChoicesStartWithTheSuggestion() {
+        let claude = ProviderConnect.choices(for: .claude, from: ["claude-opus-5-5", "claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-haiku-4-5"])
+        XCTAssertEqual(claude.first, "claude-haiku-4-5")
+        XCTAssertEqual(Set(claude), ["claude-opus-5-5", "claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-haiku-4-5"])
+
+        let openai = ProviderConnect.choices(for: .openai, from: ["gpt-5", "gpt-5-mini", "gpt-realtime", "text-embedding-3-small", "o3", "gpt-4o-mini-tts"])
+        XCTAssertEqual(openai.first, "gpt-5-mini")
+        XCTAssertEqual(Set(openai), ["gpt-5", "gpt-5-mini", "o3"])
+
+        // Previews are offered but never suggested; Gemini's prefix goes.
+        let gemini = ProviderConnect.choices(for: .gemini, from: ["models/gemini-2.5-flash", "models/gemini-3-pro-preview", "models/embedding-001"])
+        XCTAssertEqual(gemini, ["gemini-2.5-flash", "gemini-3-pro-preview"])
+
+        let openrouter = ProviderConnect.choices(for: .openrouter, from: ["openai/gpt-5-mini", "meta-llama/llama-4", "anthropic/claude-haiku-4.5"])
+        XCTAssertEqual(openrouter, ["openai/gpt-5-mini", "anthropic/claude-haiku-4.5"])
+
+        XCTAssertEqual(ProviderConnect.choices(for: .ollama, from: ["nomic-embed-text:latest", "qwen3:4b", "llama3.2:latest"]).count, 2)
+        XCTAssertEqual(ProviderConnect.choices(for: .none, from: ["x"]), [])
     }
 
     func testOpenAIGetsItsNewestGeneralMini() {

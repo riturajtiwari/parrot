@@ -71,16 +71,24 @@ struct WisprImportRun {
     }
 
     /// Records each open proposal as a pending pair, with its evidence
-    /// counts. Returns how many it recorded.
+    /// counts. A pair that already waits, such as one from the Whisper
+    /// replay, gets this run's verdict and evidence even when it now teaches
+    /// nothing; with no rules, it stays out of Review. Returns how many
+    /// proposals it recorded.
     @discardableResult
     func record(_ result: WisprImport) throws -> Int {
-        let pairs = result.proposed.map { $0.pendingPair() }.filter {
-            LearnedPair.isStorable($0.word) && ($0.heard.map(LearnedPair.isStorable) ?? true)
+        let storable = { (pair: LearnedPair) in
+            LearnedPair.isStorable(pair.word) && (pair.heard.map(LearnedPair.isStorable) ?? true)
         }
+        let proposals = result.proposed.map { $0.pendingPair() }.filter(storable)
+        let updates = result.declined.map { $0.pendingPair() }.filter(storable)
         try actions.store.update { stored in
-            for pair in pairs { stored.record(pair) }
+            for pair in proposals { stored.record(pair) }
+            for pair in updates where stored.pair(word: pair.word, heard: pair.heard)?.status == .pending {
+                stored.record(pair)
+            }
         }
-        return pairs.count
+        return proposals.count
     }
 
     /// The whole import, for the Settings button: read, let the provider in

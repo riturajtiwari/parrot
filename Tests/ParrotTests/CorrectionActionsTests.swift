@@ -54,9 +54,9 @@ final class CorrectionActionsTests: XCTestCase {
         XCTAssertEqual(try actions.added().first?.rules, [.prompt])
     }
 
-    func testPendingPairsAreJudgedAgainAndRejectedOnesLeave() throws {
+    func testPendingPairsWaitForReviewAndRejectedOnesLeave() throws {
         try actions.store.update { pairs in
-            pairs.record(LearnedPair(word: "Qwilbo", heard: "Kwilbo", rules: [], status: .pending, sources: [.whisper],
+            pairs.record(LearnedPair(word: "Qwilbo", heard: "Kwilbo", rules: [.replace, .casing], status: .pending, sources: [.watched],
                                      seen: 3, firstSeen: Date(), lastSeen: Date()))
         }
         XCTAssertEqual(try actions.pendingCount(), 1)
@@ -64,6 +64,17 @@ final class CorrectionActionsTests: XCTestCase {
         XCTAssertEqual(review.verdict.rules, [.replace, .casing])
         try actions.reject(word: "Qwilbo", heard: "Kwilbo")
         XCTAssertEqual(try actions.pendingCount(), 0)
+    }
+
+    func testAPairWithNoRulesWaitsForAJudge() throws {
+        // The Whisper replay saves its pairs with no rules, for the Wispr
+        // import to judge with the user's kept text.
+        try actions.store.update { pairs in
+            pairs.record(LearnedPair(word: "Qwilbo", heard: "Kwilbo", rules: [], status: .pending, sources: [.whisper],
+                                     seen: 3, firstSeen: Date(), lastSeen: Date()))
+        }
+        XCTAssertEqual(try actions.pendingCount(), 0)
+        XCTAssertTrue(try actions.pending(judge: LocalJudge(common: FixedCommonWords(words: []))).isEmpty)
     }
 
     func testAPendingPairShowsTheRulesRecordedWithIt() throws {

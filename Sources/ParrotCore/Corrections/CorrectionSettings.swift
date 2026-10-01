@@ -33,9 +33,10 @@ enum LLMProvider: String, Codable, CaseIterable, Sendable {
     }
 
     /// The model used when the settings name none. Only Claude has one; for
-    /// the others, "Load models" asks the provider for its list.
+    /// the others, "Load models" asks the provider for its list. The judge
+    /// only sorts word pairs, so the smallest, fastest model is enough.
     var defaultModel: String? {
-        self == .claude ? "claude-opus-5-5" : nil
+        self == .claude ? "claude-haiku-4-5" : nil
     }
 
     /// A local server needs no key.

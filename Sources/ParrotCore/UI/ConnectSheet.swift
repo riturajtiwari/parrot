@@ -40,10 +40,10 @@ struct ProviderTile: View {
 }
 
 /// The Connect window for one provider (ADR-006). It gets a key, or finds a
-/// server on this Mac, picks a model, and saves them: the key in the
-/// Keychain, the provider and the model in `settings.json`. It reads the
-/// clipboard only while it is open, and takes only text in the shape of
-/// that provider's key.
+/// server on this Mac, lets the user choose a model with the smallest one
+/// first, tests it, and saves: the key in the Keychain, the provider and
+/// the model in `settings.json`. It reads the clipboard only while it is
+/// open, and takes only text in the shape of that provider's key.
 @MainActor
 final class ConnectModel: ObservableObject {
     enum Phase: Equatable {
@@ -51,6 +51,8 @@ final class ConnectModel: ObservableObject {
         /// Waiting for the user: a key on the clipboard, or the browser sign-in.
         case waiting
         case working(String)
+        /// The key works; the user chooses the model.
+        case choosingModel
         case connected(String)
         case failed(String)
     }
@@ -61,6 +63,13 @@ final class ConnectModel: ObservableObject {
     @Published var baseURL = ""
     @Published private(set) var clearedClipboard = false
     @Published private(set) var hasSavedKey: Bool
+    /// The models to choose from, the suggested one first.
+    @Published private(set) var models: [String] = []
+    @Published var chosenModel = ""
+    @Published private(set) var modelError: String?
+    private(set) var recommended: String?
+    /// The base URL of an Other server, saved with the model.
+    private var customBase: String?
 
     private let store: SettingsStore
     private let credentials: CredentialStore
@@ -89,13 +98,26 @@ final class ConnectModel: ObservableObject {
         return false
     }
 
+    /// The model menu shows while the user chooses and while a model is tested.
+    var showsModels: Bool {
+        !models.isEmpty && (phase == .choosingModel || isBusy)
+    }
+
     /// When the window opens: a key copied just before counts, and a local
-    /// server is looked for at once.
-    func start() {
+    /// server is looked for at once. With `reuseKey` (Change… in Settings),
+    /// the saved key goes straight to the model choice.
+    func start(reuseKey: Bool = false) {
         switch provider.connectMethod {
-        case .keyPage: pollClipboard()
-        case .localServer: findLocalServer()
-        case .openRouterSignIn, .manual: break
+        case .keyPage, .openRouterSignIn:
+            if reuseKey, hasSavedKey {
+                useSavedKey()
+            } else if case .keyPage = provider.connectMethod {
+                pollClipboard()
+            }
+        case .localServer:
+            findLocalServer()
+        case .manual:
+            if reuseKey, !baseURL.isEmpty { connectCustom() }
         }
     }
 
@@ -149,7 +171,7 @@ final class ConnectModel: ObservableObject {
                     NSPasteboard.general.clearContents()
                     clearedClipboard = true
                 }
-                finish(model: ProviderConnect.suggestModel(for: provider, from: ids))
+                offer(ids)
             } catch {
                 phase = .failed(Self.message(error, provider: provider))
             }
@@ -175,9 +197,8 @@ final class ConnectModel: ObservableObject {
                 phase = .working("Getting the key from OpenRouter…")
                 let key = try await OpenRouterSignIn.key(code: code, verifier: verifier)
                 try credentials.save(key, for: .openrouter)
-                phase = .working("Choosing a model…")
-                let ids = (try? await ProviderConnect.check(key, for: .openrouter)) ?? []
-                finish(model: ProviderConnect.suggestModel(for: .openrouter, from: ids))
+                phase = .working("Loading OpenRouter's models…")
+                offer(try await ProviderConnect.check(key, for: .openrouter))
             } catch LoopbackCallback.Failure.cancelled {
                 phase = .ready
             } catch {
@@ -196,13 +217,7 @@ final class ConnectModel: ObservableObject {
                 phase = .failed("\(provider.shortName) isn't running. Start it, then click Try Again.")
                 return
             }
-            guard let model = ProviderConnect.suggestModel(for: provider, from: ids) else {
-                phase = .failed(provider == .ollama
-                    ? "Ollama has no models. Get one, for example with `ollama pull llama3.2`, then click Try Again."
-                    : "LM Studio has no model loaded. Load one, then click Try Again.")
-                return
-            }
-            finish(model: model)
+            offer(ids)
         }
     }
 
@@ -214,22 +229,77 @@ final class ConnectModel: ObservableObject {
             phase = .failed("Type the server's base URL, such as https://example.com/v1.")
             return
         }
-        let key = pastedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = pastedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The saved key goes only to the server it was saved for.
+        let saved = store.current.corrections
+        let sameServer = saved.provider == .custom && saved.baseURL == text
+        let key = typed.isEmpty && sameServer ? ((try? credentials.key(for: .custom)) ?? "") : typed
         phase = .working("Asking the server for its models…")
         task = Task {
             do {
                 let ids = try await ProviderConnect.check(key, for: .custom, baseURL: base)
-                if key.isEmpty { try? credentials.remove(for: .custom) } else { try credentials.save(key, for: .custom) }
-                finish(model: ProviderConnect.suggestModel(for: .custom, from: ids), baseURL: text)
+                if !typed.isEmpty {
+                    try credentials.save(typed, for: .custom)
+                } else if !sameServer {
+                    try? credentials.remove(for: .custom)
+                }
+                offer(ids, baseURL: text)
             } catch {
                 phase = .failed(Self.message(error, provider: .custom))
             }
         }
     }
 
-    // MARK: -
+    // MARK: - The model
 
-    private func finish(model: String?, baseURL: String? = nil) {
+    /// Shows the models to choose from, the suggested one selected.
+    private func offer(_ ids: [String], baseURL: String? = nil) {
+        customBase = baseURL
+        models = ProviderConnect.choices(for: provider, from: ids)
+        recommended = ProviderConnect.suggestModel(for: provider, from: ids)
+        chosenModel = recommended ?? models.first ?? ""
+        modelError = nil
+        if models.isEmpty {
+            switch provider {
+            case .ollama: phase = .failed("Ollama has no models. Get one, for example with `ollama pull llama3.2`, then click Try Again.")
+            case .lmstudio: phase = .failed("LM Studio has no model loaded. Load one, then click Try Again.")
+            default: phase = .failed("\(provider.shortName) lists no models that can judge.")
+            }
+        } else {
+            phase = .choosingModel
+        }
+    }
+
+    /// Tests the chosen model with two made-up pairs, and saves it when it
+    /// answers in the shape the judge needs.
+    func useChosenModel() {
+        let model = chosenModel
+        guard !model.isEmpty else { return }
+        var settings = store.current.corrections
+        settings.provider = provider
+        settings.model = model
+        settings.baseURL = customBase
+        modelError = nil
+        phase = .working("Testing \(model) with two made-up pairs…")
+        task = Task {
+            let started = Date()
+            var failure: LLMError?
+            do {
+                let client = try LLMClients.make(settings)
+                failure = await ProviderConnect.test(client)
+            } catch {
+                failure = error as? LLMError ?? .notConfigured("\(error)")
+            }
+            if let failure {
+                modelError = "\(model) didn't answer the way the judge needs (\(failure)). Choose another model."
+                phase = .choosingModel
+            } else {
+                finish(model: model, baseURL: customBase, seconds: Date().timeIntervalSince(started))
+            }
+        }
+    }
+
+    private func finish(model: String, baseURL: String?, seconds: TimeInterval) {
         let provider = self.provider
         store.update {
             $0.corrections.provider = provider
@@ -237,9 +307,9 @@ final class ConnectModel: ObservableObject {
             $0.corrections.baseURL = baseURL
         }
         hasSavedKey = provider.connectMethod != .manual && credentials.hasKey(for: provider)
-        // The provider only: never the key.
-        Log.info("corrections: connected the judge to \(provider.rawValue)")
-        phase = .connected("Connected to \(provider.shortName)" + (model.map { ", with the model \($0)" } ?? "") + ".")
+        // The provider and the model only: never the key.
+        Log.info("corrections: connected the judge to \(provider.rawValue) (\(model))")
+        phase = .connected(String(format: "Connected to %@, with the model %@. It answered the test in %.1f s.", provider.shortName, model, seconds))
     }
 
     static func message(_ error: Error, provider: LLMProvider) -> String {
@@ -260,11 +330,14 @@ final class ConnectModel: ObservableObject {
 
 struct ConnectSheet: View {
     @StateObject private var model: ConnectModel
+    /// Opened from Change…: reuse the saved key and go to the models.
+    let reuseKey: Bool
     let onClose: () -> Void
     private let clock = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
-    init(provider: LLMProvider, store: SettingsStore, onClose: @escaping () -> Void) {
+    init(provider: LLMProvider, store: SettingsStore, reuseKey: Bool = false, onClose: @escaping () -> Void) {
         _model = StateObject(wrappedValue: ConnectModel(provider: provider, store: store))
+        self.reuseKey = reuseKey
         self.onClose = onClose
     }
 
@@ -282,6 +355,9 @@ struct ConnectSheet: View {
             case .localServer(let download): localServer(download)
             case .manual: manual
             }
+            if model.showsModels {
+                modelChoice
+            }
             status
             HStack {
                 Spacer()
@@ -298,7 +374,7 @@ struct ConnectSheet: View {
         }
         .padding(24)
         .frame(width: 420)
-        .onAppear { model.start() }
+        .onAppear { model.start(reuseKey: reuseKey) }
         .onDisappear { model.cancel() }
         .onReceive(clock) { _ in model.pollClipboard() }
     }
@@ -316,7 +392,7 @@ struct ConnectSheet: View {
         }
         step(1, "Open the \(provider.keyPageName), sign in, and make a key.") {
             Button("Open \(provider.keyPageName)") { model.openKeyPage() }
-                .buttonStyle(.primaryPill)
+                .buttonStyle(PillButtonStyle(primary: !model.showsModels))
                 .disabled(model.isBusy || model.isConnected)
         }
         step(2, "Copy the key. Parrot takes it from the clipboard, checks it, and saves it in the Keychain.") {
@@ -372,6 +448,31 @@ struct ConnectSheet: View {
 
     // MARK: - Parts
 
+    private var modelChoice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Choose a model").font(.headline)
+            HStack {
+                Picker("Model", selection: $model.chosenModel) {
+                    ForEach(model.models, id: \.self) { id in
+                        Text(id == model.recommended ? "\(id) (recommended)" : id).tag(id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Use This Model") { model.useChosenModel() }
+                    .buttonStyle(.primaryPill)
+                    .disabled(model.isBusy || model.chosenModel.isEmpty)
+            }
+            caption(ProviderConnect.modelHint(for: provider))
+            if let error = model.modelError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var savedKeyRow: some View {
         HStack {
             Text("A key is saved in the Keychain.")
@@ -384,7 +485,7 @@ struct ConnectSheet: View {
 
     @ViewBuilder private var status: some View {
         switch model.phase {
-        case .ready:
+        case .ready, .choosingModel:
             EmptyView()
         case .waiting:
             progress(provider.connectMethod == .openRouterSignIn

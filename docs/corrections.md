@@ -38,7 +38,7 @@ To find what Parrot's own model mishears in your voice, replay Wispr's recording
 swift run -c release parrot-bench wispr-replay --save
 ```
 
-The replay prints the word error rate, how often the model writes your terms exactly, and what it writes instead. With `--save`, the import proposes those pairs too.
+The replay prints the word error rate, how often the model writes your terms exactly, and what it writes instead. With `--save`, the import proposes those pairs too. Saved pairs stay out of Review Corrections until an import judges them with the text you kept in Wispr Flow, because a form you keep must never be replaced.
 
 ## 3. Fix Word
 
@@ -86,7 +86,7 @@ The local rules work without a network. An LLM judge can check their proposals. 
 | Ollama, LM Studio | Parrot finds the server on this Mac and picks one of its models. Nothing leaves the Mac. |
 | Other | Type the base URL of any OpenAI-compatible server, and a key if it needs one. |
 
-Parrot picks a model for you. To change it, use **Model**. **Test Connection** sends two made-up pairs. **Disconnect** removes the key from the Keychain. The key still works at the provider until you delete it there.
+When the key works, choose a model. Parrot selects the smallest one, such as Claude Haiku 4.5, a GPT mini or a Gemini Flash, because the judge only sorts word pairs. Parrot tests the model with two made-up pairs before it saves it. To change the model later, click **Change…** next to **Model**. **Test Connection** sends the same two made-up pairs. **Disconnect** removes the key from the Keychain. The key still works at the provider until you delete it there.
 
 - Parrot reads the clipboard only while the Connect window is open. It takes only text in the shape of that provider's key.
 - The OpenRouter sign-in listens on this Mac's loopback address for one request, for at most 5 minutes.

@@ -120,18 +120,30 @@ enum ProviderConnect {
         return try? OpenAICompatibleClient.modelIDs(data)
     }
 
+    /// Checks that `client` can judge: two made-up pairs, as Test Connection
+    /// and `parrot llm test` send. Returns the first failure, or nil.
+    static func test(_ client: LLMClient) async -> LLMError? {
+        let items = [
+            WordChange(heard: ["Kwilbo"], corrected: ["Qwilbo"]),
+            WordChange(heard: ["weekend"], corrected: ["week"]),
+        ].map { LLMJudge.Item(change: $0, evidence: CorrectionEvidence(seen: 3)) }
+        return await LLMJudge(client: client, local: LocalJudge(), timeout: 30).judge(items).failures.first
+    }
+
     /// A model to start with, from the ids the provider lists: a current,
-    /// general model, small where there is a choice, since the judge only
-    /// sorts word pairs. The user can change it in Settings.
+    /// general model, the smallest where there is a choice, since the judge
+    /// only sorts word pairs. The user can choose another.
     static func suggestModel(for provider: LLMProvider, from ids: [String]) -> String? {
         switch provider {
         case .claude:
-            if let preferred = provider.defaultModel, ids.isEmpty || ids.contains(preferred) { return preferred }
-            return ["opus", "sonnet", "haiku"].lazy.compactMap { family in newest(ids.filter { $0.contains(family) }) }.first ?? ids.first
+            let claude = ids.filter { $0.hasPrefix("claude-") }
+            guard !claude.isEmpty else { return provider.defaultModel }
+            return ["haiku", "sonnet", "opus"].lazy.compactMap { family in newest(claude.filter { $0.contains(family) }) }.first
+                ?? newest(claude)
         case .openai:
             return pickOpenAI(ids)
         case .gemini:
-            return pickGemini(ids.map { $0.hasPrefix("models/") ? String($0.dropFirst("models/".count)) : $0 })
+            return pickGemini(ids.map(withoutModelsPrefix))
         case .openrouter:
             // OpenAI's and Google's models there take a JSON schema.
             let openai = ids.filter { $0.hasPrefix("openai/") }.map { String($0.dropFirst("openai/".count)) }
@@ -146,12 +158,62 @@ enum ProviderConnect {
         }
     }
 
+    /// The models to offer when the user chooses, the suggested one first,
+    /// then the newest. Models for other tasks are left out, and on
+    /// OpenRouter only the families that take a JSON schema.
+    static func choices(for provider: LLMProvider, from ids: [String]) -> [String] {
+        var list: [String]
+        switch provider {
+        case .claude:
+            list = ids.filter { $0.hasPrefix("claude-") }
+        case .openai:
+            list = general(ids, stable: false).filter { $0.hasPrefix("gpt-") || $0.range(of: #"^o\d"#, options: .regularExpression) != nil }
+        case .gemini:
+            list = general(ids.map(withoutModelsPrefix), stable: false).filter { $0.hasPrefix("gemini-") }
+        case .openrouter:
+            list = general(ids, stable: false).filter { id in ["openai/", "anthropic/", "google/"].contains(where: id.hasPrefix) }
+        case .ollama, .lmstudio, .custom:
+            list = ids.filter { !$0.localizedCaseInsensitiveContains("embed") }
+        case .none:
+            return []
+        }
+        var seen = Set<String>()
+        list = list.filter { seen.insert($0).inserted }.sorted { a, b in
+            rank(a) != rank(b) ? rank(a) > rank(b) : a < b
+        }
+        if let suggested = suggestModel(for: provider, from: ids) {
+            list.removeAll { $0 == suggested }
+            list.insert(suggested, at: 0)
+        }
+        return list
+    }
+
+    /// One line on what size of model to pick, under the model menu.
+    static func modelHint(for provider: LLMProvider) -> String {
+        switch provider {
+        case .claude: return "Haiku is the fastest and costs least. Sonnet and Opus cost more and add little for word pairs."
+        case .openai: return "A mini model is fast and costs little. Larger models add little for word pairs."
+        case .gemini: return "A Flash model is fast and costs little. Pro models add little for word pairs."
+        case .openrouter: return "A small model, such as a GPT mini or a Gemini Flash, is enough for word pairs."
+        case .ollama, .lmstudio: return "A small model answers fastest. The model must give JSON answers."
+        case .custom, .none: return "A small model is enough: the judge only sorts word pairs."
+        }
+    }
+
     /// Words in model ids that mark a model for another task.
     private static let special = ["audio", "realtime", "transcribe", "tts", "search", "image", "embed", "moderation",
-                                  "instruct", "codex", "vision", "live", "thinking", "computer-use", "deep-research", "preview", "exp"]
+                                  "instruct", "codex", "vision", "live", "computer-use", "deep-research"]
+    /// Previews and experiments: offered, but never suggested.
+    private static let unstable = ["preview", "exp", "thinking"]
 
-    private static func general(_ ids: [String]) -> [String] {
-        ids.filter { id in !special.contains { id.localizedCaseInsensitiveContains($0) } }
+    private static func general(_ ids: [String], stable: Bool = true) -> [String] {
+        let excluded = stable ? special + unstable : special
+        return ids.filter { id in !excluded.contains { id.localizedCaseInsensitiveContains($0) } }
+    }
+
+    /// Gemini lists its models as `models/gemini-…`; requests take the bare id.
+    private static func withoutModelsPrefix(_ id: String) -> String {
+        id.hasPrefix("models/") ? String(id.dropFirst("models/".count)) : id
     }
 
     /// GPT models: the newest mini, else the newest of any size.

@@ -221,7 +221,7 @@ final class CorrectionSettingsTests: XCTestCase {
     func testResolvedModelAndBaseURL() {
         var settings = CorrectionSettings()
         settings.provider = .claude
-        XCTAssertEqual(settings.resolvedModel, "claude-opus-5-5")
+        XCTAssertEqual(settings.resolvedModel, "claude-haiku-4-5")
         XCTAssertEqual(settings.resolvedBaseURL?.absoluteString, "https://api.anthropic.com/v1")
         settings.provider = .custom
         XCTAssertNil(settings.resolvedModel)
