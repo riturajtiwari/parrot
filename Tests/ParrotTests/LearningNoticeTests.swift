@@ -61,3 +61,19 @@ final class NotLearnedReasonTests: XCTestCase {
         XCTAssertFalse(try JSONDecoder().decode(CorrectionSettings.self, from: Data(#"{"showNotices":false}"#.utf8)).showNotices)
     }
 }
+
+final class ChromiumAccessTests: XCTestCase {
+    func testAnElectronBundleIsRecognized() throws {
+        let dir = try TemporaryDirectory()
+        let app = dir.url.appendingPathComponent("Zorblink.app")
+        XCTAssertFalse(ChromiumAccess.isElectron(bundle: app))
+        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/Frameworks/Electron Framework.framework"),
+                                                withIntermediateDirectories: true)
+        XCTAssertTrue(ChromiumAccess.isElectron(bundle: app))
+        XCTAssertFalse(ChromiumAccess.isElectron(bundle: nil))
+    }
+
+    func testTheClaudeAppIsWatchedByDefault() {
+        XCTAssertTrue(CorrectionSettings().watchedApps.contains("com.anthropic.claudefordesktop"))
+    }
+}

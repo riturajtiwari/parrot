@@ -90,6 +90,7 @@ struct CorrectionSettings: Codable, Equatable, Sendable {
     static let defaultWatchedApps = [
         "com.apple.TextEdit", "com.apple.Notes", "com.apple.mail", "com.apple.MobileSMS",
         "com.apple.Safari", "com.google.Chrome", "com.tinyspeck.slackmacgap", "com.microsoft.Outlook",
+        "com.anthropic.claudefordesktop",
     ]
 
     init() {}

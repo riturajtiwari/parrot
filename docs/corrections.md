@@ -79,7 +79,7 @@ A notice takes no focus from your app, and a new dictation hides it. A dot on th
 - **Review:** Parrot always asks. Nothing changes until you add a word.
 - **Hybrid:** Parrot asks first. When its proposals match 95% of your choices over at least 20 of them, it adds clear fixes of rare words at once, with Undo. Automatic adds go to `~/Library/Application Support/parrot/learned-dictionary`, never into your own dictionary.
 
-The watched apps are in `settings.json` under `corrections.watchedApps`. To see which apps expose their text fields, run `parrot-bench ax-probe`. Parrot never watches a password field, and it reads no keystrokes.
+The watched apps are in `settings.json` under `corrections.watchedApps`; the log names an app that is not on the list when you dictate into it. Apps built on Electron, such as Claude and Slack, share their text fields only when an assistive app asks, as VoiceOver does. When you start a dictation in a watched Electron app, Parrot asks once, which costs that app some memory and CPU. To see which apps expose their text fields, run `parrot-bench ax-probe`. Parrot never watches a password field, and it reads no keystrokes.
 
 If you change a word that a learned rule wrote back to what you said, Parrot marks the rule as suspect and shows it in Review Corrections.
 

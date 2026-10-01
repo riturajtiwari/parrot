@@ -18,6 +18,10 @@ final class EditWatcher: DictationObserver {
     private var session: WatchSession?
     private let settings: () -> CorrectionSettings
     private let learner: EditLearner
+    /// Electron apps already asked for their accessibility tree, by process.
+    private var askedPIDs: Set<pid_t> = []
+    /// Apps already named in the log as not watched, once per run.
+    private var namedUnwatched: Set<String> = []
 
     init(settings: @escaping () -> CorrectionSettings, learner: EditLearner) {
         self.settings = settings
@@ -56,12 +60,54 @@ final class EditWatcher: DictationObserver {
     func dictationStarted() {
         session?.stop(.nextDictation)
         session = nil
+        let settings = self.settings()
+        guard settings.learning != .off, let app = NSWorkspace.shared.frontmostApplication,
+              let id = app.bundleIdentifier else { return }
+        guard settings.watchedApps.contains(id) else {
+            // The app's id only, so the user can add it to watchedApps.
+            if namedUnwatched.insert(id).inserted { Log.info("edit watch: \(id) is not a watched app") }
+            return
+        }
+        // Asked while the user speaks, so the tree is there by the paste.
+        if askedPIDs.insert(app.processIdentifier).inserted {
+            ChromiumAccess.ask(app, on: queue)
+        }
     }
 
     /// The spaces `Spacing` put before the transcript: the paste starts at
     /// the selection, the words after them.
     private static func leadingSpaces(_ text: String) -> Int {
         text.utf16.prefix(while: { $0 == 0x20 }).count
+    }
+}
+
+/// Apps built on Electron (Claude, Slack, Visual Studio Code) build their
+/// accessibility tree only when an assistive app asks for it, as VoiceOver
+/// does. Without the tree, Parrot can't read their text fields: not the
+/// text before the cursor, and not the edits after a paste. Parrot asks only
+/// watched apps, because the tree costs the app some memory and CPU.
+enum ChromiumAccess {
+    /// The attribute Electron reads. Chrome itself shares its text fields
+    /// without being asked.
+    static let attribute = "AXManualAccessibility"
+
+    /// The app bundle at `url` is built on Electron.
+    static func isElectron(bundle url: URL?) -> Bool {
+        guard let url else { return false }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path)
+    }
+
+    /// Asks `app` for its tree on `queue`, with a short timeout, so a busy
+    /// app never delays the hotkey.
+    static func ask(_ app: NSRunningApplication, on queue: DispatchQueue) {
+        guard isElectron(bundle: app.bundleURL) else { return }
+        let pid = app.processIdentifier
+        queue.async {
+            let element = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(element, 0.25)
+            let result = AXUIElementSetAttributeValue(element, attribute as CFString, kCFBooleanTrue)
+            Log.info("edit watch: asked an Electron app for its accessibility tree (\(result == .success ? "done" : "AX error \(result.rawValue)"))")
+        }
     }
 }
 
