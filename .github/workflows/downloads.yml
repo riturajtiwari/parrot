@@ -38,6 +38,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads.csv
+          # Vercel builds every pushed branch from site/; this stops it building stats.
+          mkdir -p site
+          echo '{"git":{"deploymentEnabled":false}}' > site/vercel.json
+          git add downloads.csv site/vercel.json
           git diff --cached --quiet || git commit -m "stats: downloads $(date -u +%Y-%m-%d)"
           git push origin stats

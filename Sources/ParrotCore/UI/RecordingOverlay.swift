@@ -21,8 +21,19 @@ final class RecordingOverlay {
     nonisolated static let messageDuration: TimeInterval = 4
 
     /// Wide enough for a one-line message; the panel is transparent and
-    /// click-through, so the unused width is invisible.
-    private static let panelSize = NSSize(width: 640, height: 44)
+    /// click-through, so the unused width is invisible. Taller than the pill
+    /// so its SwiftUI shadow is not clipped.
+    private static let panelSize = NSSize(width: 640, height: 64)
+
+    /// How long the pill takes to grow or shrink; on hide, the window is
+    /// ordered out once it has.
+    nonisolated static let scaleDuration: TimeInterval = 0.3
+
+    init() {
+        // Build the panel now, not on the first press, so the first pill
+        // appears as quickly as every later one.
+        ensureWindow()
+    }
 
     private var window: NSPanel?
     private let model = OverlayModel()
@@ -35,6 +46,7 @@ final class RecordingOverlay {
         if state == .recording {
             model.resetLevels()
         }
+
         guard let window else { return }
         let needsAppear = !window.isVisible
         if needsAppear {
@@ -57,7 +69,7 @@ final class RecordingOverlay {
         // shown again in the meantime.
         let window = self.window
         let model = self.model
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scaleDuration) {
             guard model.state == .hidden else { return }
             window?.orderOut(nil)
         }
@@ -101,7 +113,10 @@ final class RecordingOverlay {
         panel.level = .statusBar
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // The pill draws its own shadow. A window shadow is computed from the
+        // window's contents when it is shown, so it would not follow the pill
+        // as it grows and shrinks, and would linger after it had gone.
+        panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
@@ -122,7 +137,9 @@ final class RecordingOverlay {
         let frame = window.frame
         let visible = screen.visibleFrame
         let x = visible.midX - frame.width / 2
-        let y = visible.minY + 32
+        // The pill sits 32 pt above the bottom of the visible frame; the
+        // panel extends below it by half its extra height.
+        let y = visible.minY + 32 - (frame.height - 44) / 2
         window.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }
@@ -158,6 +175,14 @@ final class OverlayModel: ObservableObject {
 
     @Published var state: RecordingOverlay.State = .hidden
     @Published var levels: [Float] = Array(repeating: 0, count: barCount)
+    /// Whether the current recording has been louder than silence, so a
+    /// recording with nothing said gets no loading animation.
+    @Published private(set) var heardVoice = false
+
+    /// RMS over one refresh interval above which the recording counts as
+    /// speech. Silent recordings measure about 0.001 over their whole length;
+    /// speech averages 0.007 to 0.018 and peaks well above.
+    static let voiceThreshold: Float = 0.01
 
     /// How often the bars move. Capture delivers a level per buffer, about
     /// every 12 ms with the AUHAL input (#52); the bars are tuned for about
@@ -179,6 +204,9 @@ final class OverlayModel: ObservableObject {
         pendingPower = 0
         pendingCount = 0
         lastRefresh = now
+        if rms > Self.voiceThreshold, !heardVoice {
+            heardVoice = true
+        }
         showLevel(rms)
     }
 
@@ -197,6 +225,7 @@ final class OverlayModel: ObservableObject {
     func resetLevels() {
         pendingPower = 0
         pendingCount = 0
+        heardVoice = false
         levels = Array(repeating: 0, count: Self.barCount)
     }
 }
@@ -206,15 +235,22 @@ private struct OverlayPill: View {
 
     var body: some View {
         content
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 13)
             .padding(.vertical, 9)
             .background(
                 Capsule()
                     .fill(Color(red: 16/255, green: 18/255, blue: 18/255))
+                    .shadow(color: .black.opacity(0.28), radius: 6, y: 2)
+            )
+            // A faint light rim, like the edge of a macOS window, so the pill
+            // holds its shape on a dark background.
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
             )
             .scaleEffect(model.state == .hidden ? 0 : 1)
             .animation(
-                .timingCurve(0.16, 1, 0.3, 1, duration: 0.3),
+                .timingCurve(0.16, 1, 0.3, 1, duration: RecordingOverlay.scaleDuration),
                 value: model.state
             )
     }
@@ -222,39 +258,70 @@ private struct OverlayPill: View {
     @ViewBuilder
     private var content: some View {
         switch model.state {
-        case .hidden, .recording:
-            Waveform(levels: model.levels)
-                .frame(width: 54, height: 22)
-        case .transcribing:
-            ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.8)
-                .frame(width: 54, height: 22)
+        case .hidden, .recording, .transcribing:
+            // The same bars in both states, so transcribing is the recording
+            // bars taking up the loop rather than a swap to a spinner.
+            Waveform(
+                levels: model.levels,
+                transcribing: model.state == .transcribing,
+                heardVoice: model.heardVoice
+            )
+                .frame(width: 51, height: 20)
         case .message(let text):
             Text(text)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Color(red: 235/255, green: 238/255, blue: 242/255))
                 .lineLimit(1)
                 .fixedSize()
-                .frame(height: 22)
+                .frame(height: 20)
         }
     }
 }
 
 private struct Waveform: View {
     let levels: [Float]
+    var transcribing = false
+    var heardVoice = false
     private let color = Color(red: 181/255.0, green: 209/255.0, blue: 255/255.0)
 
+    /// Height of an idle bar after a silent recording, as a fraction of the
+    /// full height.
+    private static let restHeight: CGFloat = 0.2
+    /// Size of the dots the middle bars settle into while transcribing.
+    private static let dotSize: CGFloat = 3.5
+    /// How long the bars take to settle into dots.
+    private static let settleDuration = 0.25
+
     var body: some View {
-        HStack(alignment: .center, spacing: 4) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
-                Capsule()
-                    .fill(color)
-                    .frame(width: 2.5)
-                    .frame(maxHeight: .infinity)
-                    .scaleEffect(y: max(0.10, CGFloat(level)), anchor: .center)
-                    .animation(.easeOut(duration: 0.09), value: level)
+        GeometryReader { geo in
+            HStack(alignment: .center, spacing: 3.75) {
+                ForEach(Array(levels.enumerated()), id: \.offset) { i, level in
+                    let bar = bar(i, level: level, height: geo.size.height)
+                    Capsule()
+                        .fill(color)
+                        .frame(width: bar.width, height: bar.height)
+                        .opacity(bar.opacity)
+                        .animation(
+                            transcribing ? .easeInOut(duration: Self.settleDuration) : .easeOut(duration: 0.09),
+                            value: bar.height
+                        )
+                        .animation(.easeInOut(duration: Self.settleDuration), value: bar.opacity)
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+    }
+
+    /// While recording, each bar follows the level. While transcribing, the
+    /// outer bars fade where they stand and the middle ones settle into dots;
+    /// after a silent recording, every bar just rests.
+    private func bar(_ i: Int, level: Float, height: CGFloat) -> (width: CGFloat, height: CGFloat, opacity: Double) {
+        let live = max(0.10, CGFloat(level)) * height
+        guard transcribing else { return (2.5, live, 1) }
+        guard heardVoice else { return (2.5, Self.restHeight * height, 1) }
+        if i == 0 || i == levels.count - 1 {
+            return (2.5, live, 0)
+        }
+        return (Self.dotSize, Self.dotSize, 1)
     }
 }
