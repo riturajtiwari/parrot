@@ -7,6 +7,25 @@ struct CorrectionsSection: View {
     @ObservedObject var store: SettingsStore
     /// Opens Review Corrections.
     var openReview: () -> Void = {}
+    /// Fixed values for the README screenshots (`Screenshots`). With them,
+    /// the section reads nothing from the Keychain, `corrections.json` or
+    /// Wispr Flow.
+    var preview: Preview?
+
+    struct Preview {
+        var hasKey = true
+        var pendingCount = 0
+        var wisprAvailable = true
+        var gate = HybridGate.Status(decisions: 0, accepted: 0)
+    }
+
+    init(store: SettingsStore, openReview: @escaping () -> Void = {}, preview: Preview? = nil) {
+        self.store = store
+        self.openReview = openReview
+        self.preview = preview
+        _hasKey = State(initialValue: preview?.hasKey ?? false)
+        _pendingCount = State(initialValue: preview?.pendingCount ?? 0)
+    }
 
     /// The provider whose Connect window is open. With a saved key, the
     /// window goes straight to the models.
@@ -43,7 +62,7 @@ struct CorrectionsSection: View {
             }
             caption(Self.explanation(settings.learning))
             if settings.learning == .hybrid {
-                caption(HybridGate.status((try? LearnedStore().load().pairs) ?? []).summary)
+                caption((preview?.gate ?? HybridGate.status((try? LearnedStore().load().pairs) ?? [])).summary)
             }
             if settings.learning != .off {
                 PillRow("Notices") {
@@ -69,7 +88,7 @@ struct CorrectionsSection: View {
             }
             judge
 
-            if WisprImportRun.isAvailable() {
+            if preview?.wisprAvailable ?? WisprImportRun.isAvailable() {
                 PillRow("Wispr Flow") {
                     Button(importing ? "Importing…" : "Import", action: importWispr)
                         .buttonStyle(.pill)
@@ -125,6 +144,11 @@ struct CorrectionsSection: View {
     }
 
     private func refresh() {
+        if let preview {
+            hasKey = preview.hasKey
+            pendingCount = preview.pendingCount
+            return
+        }
         hasKey = provider == .none ? false : credentials.hasKey(for: provider)
         pendingCount = (try? CorrectionActions().pendingCount()) ?? 0
     }

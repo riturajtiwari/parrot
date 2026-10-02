@@ -11,7 +11,7 @@ struct Bench: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "parrot-bench",
         abstract: "Measure latency: the model over recordings, or microphone capture.",
-        subcommands: [BenchTranscription.self, BenchCapture.self, BenchAXProbe.self, BenchWisprReplay.self],
+        subcommands: [BenchTranscription.self, BenchCapture.self, BenchAXProbe.self, BenchWisprReplay.self, BenchScreenshots.self],
         defaultSubcommand: BenchTranscription.self
     )
 }
@@ -198,3 +198,19 @@ private func exiting(_ body: () throws -> Void) throws {
 }
 
 Bench.main()
+
+struct BenchScreenshots: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "screenshots",
+        abstract: "Draw the fork's windows with made-up words, light and dark, as PNG files for the README."
+    )
+
+    @Option(help: "The folder for the PNG files.")
+    var out = "docs/assets/screenshots"
+
+    func run() throws {
+        let dir = URL(fileURLWithPath: out)
+        let files = try MainActor.assumeIsolated { try Screenshots.write(to: dir) }
+        for file in files { print(file.path) }
+    }
+}

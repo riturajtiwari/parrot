@@ -108,6 +108,11 @@ final class LearningNotice: DictationObserver {
         hide()
     }
 
+    /// A notice as a view, for the README screenshots.
+    static func preview(_ content: Content) -> AnyView {
+        AnyView(NoticeCapsule(model: NoticeModel(content), perform: { _ in }))
+    }
+
     // MARK: - Timing
 
     private func schedule(_ seconds: TimeInterval) {
@@ -202,6 +207,10 @@ private final class NoticeHostingView: NSHostingView<NoticeCapsule> {
 @MainActor
 private final class NoticeModel: ObservableObject {
     @Published var content: LearningNotice.Content?
+
+    init(_ content: LearningNotice.Content? = nil) {
+        self.content = content
+    }
 }
 
 private struct NoticeCapsule: View {

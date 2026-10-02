@@ -53,6 +53,21 @@ struct FixWordView: View {
     let onCancel: () -> Void
     let onAdd: (WordChange, Set<CorrectionRule>) -> String?
 
+    /// `corrected` fills the second field, with the rules the local rules
+    /// propose for it, as the README screenshots show.
+    init(heard: String, corrected: String = "", onCancel: @escaping () -> Void, onAdd: @escaping (WordChange, Set<CorrectionRule>) -> String?) {
+        _heard = State(initialValue: heard)
+        _corrected = State(initialValue: corrected)
+        self.onCancel = onCancel
+        self.onAdd = onAdd
+        if !corrected.isEmpty {
+            let change = WordChange(heard: WordDiff.words(heard).map(\.text), corrected: WordDiff.words(corrected).map(\.text))
+            let verdict = LocalJudge().judge(change, evidence: CorrectionEvidence(manual: true))
+            _rules = State(initialValue: verdict.rules)
+            _reasons = State(initialValue: verdict.reasons)
+        }
+    }
+
     private let judge = LocalJudge()
 
     private var change: WordChange {
@@ -106,7 +121,7 @@ struct FixWordView: View {
         .frame(width: 420)
         .onChange(of: corrected) { propose() }
         .onChange(of: heard) { propose() }
-        .onAppear { corrected = heard }
+        .onAppear { if corrected.isEmpty { corrected = heard } }
     }
 
     private func binding(_ rule: CorrectionRule) -> Binding<Bool> {

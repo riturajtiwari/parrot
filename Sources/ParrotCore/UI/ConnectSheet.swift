@@ -72,6 +72,22 @@ final class ConnectModel: ObservableObject {
     private(set) var recommended: String?
     /// The base URL of an Other server, saved with the model.
     private var customBase: String?
+    /// A frozen window for the README screenshots: no network, no Keychain
+    /// key, no clipboard.
+    private var isPreview = false
+
+    /// The window at its model step, for the README screenshots.
+    static func preview(provider: LLMProvider, store: SettingsStore, models: [String], recommended: String?) -> ConnectModel {
+        // A Keychain service that holds nothing: no real key is ever read.
+        let model = ConnectModel(provider: provider, store: store, credentials: CredentialStore(service: "parrot.screenshots"))
+        model.isPreview = true
+        model.hasSavedKey = true
+        model.models = models
+        model.recommended = recommended
+        model.chosenModel = recommended ?? models.first ?? ""
+        model.phase = .choosingModel
+        return model
+    }
 
     private let store: SettingsStore
     private let credentials: CredentialStore
@@ -115,6 +131,7 @@ final class ConnectModel: ObservableObject {
     /// a key copied just before counts, and a local server or the saved
     /// Other server is asked for its models at once.
     func start() {
+        guard !isPreview else { return }
         switch provider.connectMethod {
         case .keyPage, .openRouterSignIn:
             if hasSavedKey {
@@ -160,7 +177,7 @@ final class ConnectModel: ObservableObject {
     /// Looks at the clipboard; the window calls it twice a second. Only
     /// while the steps for a new key show.
     func pollClipboard() {
-        guard case .keyPage = provider.connectMethod, showsKeySteps, !isBusy, !isConnected else { return }
+        guard !isPreview, case .keyPage = provider.connectMethod, showsKeySteps, !isBusy, !isConnected else { return }
         let pasteboard = NSPasteboard.general
         guard pasteboard.changeCount != seenChange else { return }
         seenChange = pasteboard.changeCount
@@ -373,6 +390,12 @@ struct ConnectSheet: View {
 
     init(provider: LLMProvider, store: SettingsStore, onClose: @escaping () -> Void) {
         _model = StateObject(wrappedValue: ConnectModel(provider: provider, store: store))
+        self.onClose = onClose
+    }
+
+    /// A window around a given model, for the README screenshots.
+    init(model: ConnectModel, onClose: @escaping () -> Void = {}) {
+        _model = StateObject(wrappedValue: model)
         self.onClose = onClose
     }
 
